@@ -1,0 +1,36 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+/yammm-lsp
+
+# OS
+*.DS_Store
+
+# Test artifacts
+*.test
+*.out
+
+# Go workspace
+go.work.sum
+
+# VS Code extension build artifacts
+node_modules/
+out/
+*.vsix
+.vscode-test/
+bin/
+editors/vscode/bin/
+
+# LSP log output
+log/*
+!log/.gitkeep
+
+# Editor / LLM config
+.vscode/
+.claude/
+.codex/
+
+# Docs (gitignored except for repo root README)
+docs/

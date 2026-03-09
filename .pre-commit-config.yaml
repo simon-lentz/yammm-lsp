@@ -1,0 +1,47 @@
+repos:
+  # --- text hygiene ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+      - id: check-yaml
+      - id: check-json
+  # --- yaml formatting ---
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.21.0
+    hooks:
+      - id: yamlfmt
+  # --- GHA linting ---
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.11
+    hooks:
+      - id: actionlint
+        name: actionlint (GHA)
+        files: ^\.github/workflows/.*\.ya?ml$
+  # --- Go formatting & imports ---
+  - repo: https://github.com/tekwizely/pre-commit-golang
+    rev: v1.0.0-rc.4
+    hooks:
+      - id: go-fumpt-repo
+        name: gofumpt
+      - id: go-imports-repo
+        name: goimports
+      - id: go-mod-tidy-repo
+        name: go mod tidy
+  # --- lint & test ---
+  - repo: local
+    hooks:
+      - id: golangci-lint
+        name: golangci-lint
+        language: system
+        pass_filenames: false
+        files: \.go$
+        entry: go tool golangci-lint run
+      - id: go-test
+        name: go test
+        language: system
+        pass_filenames: false
+        always_run: true
+        entry: go test ./...
