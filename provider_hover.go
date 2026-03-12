@@ -1,12 +1,12 @@
 package lsp
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
 
-	"github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -18,7 +18,7 @@ import (
 // textDocumentHover handles textDocument/hover requests.
 //
 //nolint:nilnil // LSP protocol: nil result means "no hover info"
-func (s *Server) textDocumentHover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+func (s *Server) textDocumentHover(_ context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
 	uri := params.TextDocument.URI
 
 	s.logger.Debug("hover request",

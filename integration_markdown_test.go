@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm-lsp/testutil"
 
@@ -31,9 +31,8 @@ func newMarkdownTestHarness(t *testing.T, root string) *testutil.Harness {
 func newMarkdownTestHarnessWithServer(t *testing.T, root string) (*testutil.Harness, *Server) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	silenceCommonLog()
 	server := NewServer(logger, Config{ModuleRoot: root})
-	h := testutil.NewHarness(t, server.Handler(), root)
+	h := testutil.NewHarness(t, server.Mux(), root)
 	err := h.Initialize()
 	require.NoError(t, err, "harness initialization failed")
 	return h, server
@@ -51,14 +50,12 @@ func TestMarkdownIntegration_DiagnosticsInCodeBlock(t *testing.T) {
 	mdPath := filepath.Join(tmpDir, "test.md")
 	require.NoError(t, os.WriteFile(mdPath, []byte(content), 0o600))
 
-	// Open markdown document (triggers analysis via handler)
-	err := h.OpenMarkdownDocument(mdPath, content)
-	require.NoError(t, err)
-
-	// Use a notificationCollector to capture diagnostics directly from the workspace.
-	// The handler's open already analyzed, but re-analyzing with a collector lets us
-	// inspect the published diagnostics.
+	// Open the markdown document directly in the workspace (bypassing jrpc2)
+	// so we can call AnalyzeMarkdownAndPublish synchronously without a race.
 	uri := testutil.PathToURI(mdPath)
+	server.workspace.MarkdownDocumentOpened(uri, 1, content)
+
+	// Re-analyze with a notificationCollector so we can inspect published diagnostics.
 	collector := &notificationCollector{}
 	server.workspace.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
@@ -258,11 +255,8 @@ func TestMarkdownIntegration_CompletionInBlock(t *testing.T) {
 	require.NotNil(t, result, "expected completion items inside code block")
 
 	// Should have keyword/type completions
-	switch items := result.(type) {
-	case []protocol.CompletionItem:
+	if items, ok := result.([]protocol.CompletionItem); ok {
 		assert.NotEmpty(t, items, "expected completion items")
-	case *protocol.CompletionList:
-		assert.NotEmpty(t, items.Items, "expected completion items")
 	}
 }
 
@@ -277,11 +271,12 @@ func TestMarkdownIntegration_ImportRejection(t *testing.T) {
 	mdPath := filepath.Join(tmpDir, "imports.md")
 	require.NoError(t, os.WriteFile(mdPath, []byte(content), 0o600))
 
-	err := h.OpenMarkdownDocument(mdPath, content)
-	require.NoError(t, err)
-
-	// Capture diagnostics via the workspace directly.
+	// Open the markdown document directly in the workspace (bypassing jrpc2)
+	// so we can call AnalyzeMarkdownAndPublish synchronously without a race.
 	uri := testutil.PathToURI(mdPath)
+	server.workspace.MarkdownDocumentOpened(uri, 1, content)
+
+	// Re-analyze with a notificationCollector so we can inspect published diagnostics.
 	collector := &notificationCollector{}
 	server.workspace.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
@@ -311,6 +306,10 @@ func TestMarkdownIntegration_ImportRejection(t *testing.T) {
 	assert.True(t, found, "expected E_IMPORT_NOT_ALLOWED diagnostic, got: %+v", diags)
 
 	// Features should still work despite the import error (no crash).
+	// Open via harness for feature requests; sync to ensure processing.
+	err := h.OpenMarkdownDocument(mdPath, content)
+	require.NoError(t, err)
+	h.Sync()
 	_, err = h.DocumentSymbols(mdPath)
 	require.NoError(t, err, "document symbols should not error despite import rejection")
 }
@@ -369,6 +368,9 @@ func TestMarkdownIntegration_StaleVersionRejection(t *testing.T) {
 	err = h.ChangeDocument(mdPath, content, 1)
 	require.NoError(t, err)
 
+	// Ensure all notifications have been processed before inspecting workspace state.
+	h.Sync()
+
 	// Directly verify the stored text retained v2 content (stale v1 was rejected).
 	uri := testutil.PathToURI(mdPath)
 	text, ok := server.workspace.GetMarkdownCurrentText(uri)
@@ -410,14 +412,7 @@ func TestMarkdownIntegration_IgnoreNonMarkdownExtension(t *testing.T) {
 
 	// Open with languageID "plaintext" and .txt extension
 	uri := testutil.PathToURI(txtPath)
-	err := h.Handler().TextDocumentDidOpen(nil, &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{
-			URI:        uri,
-			LanguageID: "plaintext",
-			Version:    1,
-			Text:       content,
-		},
-	})
+	err := h.OpenDocumentRaw(uri, "plaintext", content)
 	require.NoError(t, err)
 
 	// Hover should return nil — .txt files are not handled

@@ -3,31 +3,20 @@ package lsp
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"slices"
 	"strings"
 	"sync"
 
-	// commonlog is a required dependency of github.com/tliron/glsp.
-	// We silence it in NewServer() via commonlog.Configure(0, nil) because
-	// this server uses slog for all logging. The blank import of the "simple"
-	// backend is required by glsp at runtime.
-	"github.com/tliron/commonlog"
-	"github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
-	"github.com/tliron/glsp/server"
+	"github.com/creachadair/jrpc2"
+	"github.com/creachadair/jrpc2/channel"
+	"github.com/creachadair/jrpc2/handler"
 
-	_ "github.com/tliron/commonlog/simple" // required backend for glsp
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 )
-
-// silenceCommonLog configures commonlog exactly once. The commonlog library
-// uses unsynchronized global state in Configure(), so concurrent calls from
-// parallel tests cause data races. Using sync.OnceFunc ensures thread safety.
-var silenceCommonLog = sync.OnceFunc(func() { commonlog.Configure(0, nil) })
 
 // isMarkdownURI delegates to lsputil.IsMarkdownURI.
 var isMarkdownURI = lsputil.IsMarkdownURI
@@ -50,9 +39,12 @@ type Config struct {
 type Server struct {
 	logger    *slog.Logger
 	config    Config
-	handler   protocol.Handler
-	server    *server.Server
+	mux       handler.Map
+	jrpcSrv   *jrpc2.Server
 	workspace *Workspace
+
+	// traceValue stores the current trace level (replaces protocol.SetTraceValue global)
+	traceValue protocol.TraceValue
 
 	// shutdownCalled tracks whether shutdown was called before exit (LSP lifecycle)
 	shutdownCalled bool
@@ -74,51 +66,70 @@ func NewServer(logger *slog.Logger, cfg Config) *Server {
 		workspace: NewWorkspace(logger, cfg), // Pass base logger; workspace adds its own component
 	}
 
-	// Silence commonlog - glsp uses it internally but we use slog for all logging.
-	silenceCommonLog()
-
-	s.handler = protocol.Handler{
+	s.mux = handler.Map{
 		// Lifecycle
-		Initialize:    s.initialize,
-		Initialized:   s.initialized,
-		Shutdown:      s.shutdown,
-		Exit:          s.exit,
-		SetTrace:      s.setTrace,
-		CancelRequest: s.cancelRequest,
+		"initialize":      handler.New(s.initialize),
+		"initialized":     handler.New(s.initialized),
+		"shutdown":        handler.New(s.shutdown),
+		"exit":            handler.New(s.exit),
+		"$/setTrace":      handler.New(s.setTrace),
+		"$/cancelRequest": handler.New(s.cancelRequest),
 
-		// Text Document Synchronization (Phase 1)
-		TextDocumentDidOpen:   s.textDocumentDidOpen,
-		TextDocumentDidChange: s.textDocumentDidChange,
-		TextDocumentDidClose:  s.textDocumentDidClose,
+		// Text Document Synchronization
+		"textDocument/didOpen":   handler.New(s.textDocumentDidOpen),
+		"textDocument/didChange": handler.New(s.textDocumentDidChange),
+		"textDocument/didClose":  handler.New(s.textDocumentDidClose),
 
-		// Language Features (Phases 2-6) - stubs for now
-		TextDocumentDefinition:     s.textDocumentDefinition,
-		TextDocumentHover:          s.textDocumentHover,
-		TextDocumentCompletion:     s.textDocumentCompletion,
-		TextDocumentDocumentSymbol: s.textDocumentDocumentSymbol,
-		TextDocumentFormatting:     s.textDocumentFormatting,
+		// Language Features
+		"textDocument/definition":     handler.New(s.textDocumentDefinition),
+		"textDocument/hover":          handler.New(s.textDocumentHover),
+		"textDocument/completion":     handler.New(s.textDocumentCompletion),
+		"textDocument/documentSymbol": handler.New(s.textDocumentDocumentSymbol),
+		"textDocument/formatting":     handler.New(s.textDocumentFormatting),
 
 		// Workspace
-		WorkspaceDidChangeWatchedFiles:     s.workspaceDidChangeWatchedFiles,
-		WorkspaceDidChangeWorkspaceFolders: s.workspaceDidChangeWorkspaceFolders,
+		"workspace/didChangeWatchedFiles":     handler.New(s.workspaceDidChangeWatchedFiles),
+		"workspace/didChangeWorkspaceFolders": handler.New(s.workspaceDidChangeWorkspaceFolders),
 	}
-
-	s.server = server.NewServer(&s.handler, serverName, false)
 
 	return s
 }
 
-// Handler returns the protocol handler for testing purposes.
-func (s *Server) Handler() *protocol.Handler {
-	return &s.handler
+// Mux returns the handler map for testing purposes.
+func (s *Server) Mux() handler.Map { return s.mux }
+
+// notifier creates a Notifier from a jrpc2 handler context.
+// Returns nil if ctx has no jrpc2 server (e.g., in unit tests).
+func (s *Server) notifier(ctx context.Context) Notifier {
+	srv := recoverServerFromContext(ctx)
+	if srv == nil {
+		return nil
+	}
+	return func(method string, params any) {
+		_ = srv.Notify(ctx, method, params) //nolint:errcheck // best-effort notification; no recovery path
+	}
 }
 
-// RunStdio runs the server using stdio transport.
+// recoverServerFromContext safely extracts the jrpc2 server from ctx.
+// Returns nil if no server is present (jrpc2.ServerFromContext panics
+// on a bare context because it uses an unsafe type assertion).
+func recoverServerFromContext(ctx context.Context) (srv *jrpc2.Server) {
+	defer func() {
+		if r := recover(); r != nil {
+			srv = nil
+		}
+	}()
+	return jrpc2.ServerFromContext(ctx)
+}
+
+// RunStdio runs the server using stdio transport with LSP framing.
 func (s *Server) RunStdio() error {
-	if err := s.server.RunStdio(); err != nil {
-		return fmt.Errorf("run stdio: %w", err)
-	}
-	return nil
+	ch := channel.LSP(os.Stdin, os.Stdout)
+	s.jrpcSrv = jrpc2.NewServer(s.mux, &jrpc2.ServerOptions{
+		AllowPush: true, // required for server-to-client notifications
+	})
+	s.jrpcSrv.Start(ch)
+	return s.jrpcSrv.Wait() //nolint:wrapcheck // top-level server entrypoint
 }
 
 // Shutdown initiates graceful server shutdown.
@@ -128,30 +139,23 @@ func (s *Server) Shutdown() {
 	s.workspace.Shutdown()
 }
 
-// Close closes the JSON-RPC connection, causing RunStdio to return.
+// Close stops the JSON-RPC server, causing RunStdio to return.
 // This enables graceful shutdown when a signal is received.
 //
 // Close is idempotent: multiple calls return the same result and do not panic.
-// It is safe to call before RunStdio (returns nil if connection not initialized).
-//
-// Note: The nil check is intentionally outside closeOnce.Do() to avoid consuming
-// the Once when the connection is not yet ready. This allows callers to retry
-// Close() if called before RunStdio() has initialized the connection.
+// It is safe to call before RunStdio (returns nil if server not started).
 func (s *Server) Close() error {
-	conn := s.server.GetStdio()
-	if conn == nil {
-		return nil // Connection not ready, caller can retry
+	if s.jrpcSrv == nil {
+		return nil
 	}
 	s.closeOnce.Do(func() {
-		if err := conn.Close(); err != nil {
-			s.closeErr = fmt.Errorf("close connection: %w", err)
-		}
+		s.jrpcSrv.Stop()
 	})
 	return s.closeErr
 }
 
 // initialize handles the initialize request.
-func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams) (any, error) {
+func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams) (any, error) {
 	s.logger.Info("initialize request received",
 		slog.String("client_name", s.clientName(params)),
 		slog.String("root_uri", s.rootURI(params)),
@@ -175,25 +179,31 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 	}
 
 	// Use UTF-16 encoding (default for VS Code compatibility)
-	// Note: position encoding negotiation requires LSP 3.17, glsp only supports 3.16
 	posEncoding := PositionEncodingUTF16
 	s.workspace.SetPositionEncoding(posEncoding)
 	s.logger.Info("using position encoding", slog.String("encoding", string(posEncoding)))
 
-	// Build capabilities
-	capabilities := s.handler.CreateServerCapabilities()
-
-	// Override to use full text sync (Phase 1 - simpler and safer)
+	// Build capabilities manually (replaces CreateServerCapabilities)
 	syncKind := protocol.TextDocumentSyncKindFull
-	if syncOpts, ok := capabilities.TextDocumentSync.(*protocol.TextDocumentSyncOptions); ok {
-		syncOpts.Change = &syncKind
-	}
-
-	// Configure completion trigger characters:
-	// - "." for qualified access (e.g., "parts.Wheel")
-	// - " " for context after keywords (extends, import, as, -->, *->)
-	capabilities.CompletionProvider = &protocol.CompletionOptions{
-		TriggerCharacters: []string{".", " "},
+	trueVal := true
+	capabilities := protocol.ServerCapabilities{
+		TextDocumentSync: &protocol.TextDocumentSyncOptions{
+			OpenClose: &trueVal,
+			Change:    &syncKind,
+		},
+		CompletionProvider: &protocol.CompletionOptions{
+			TriggerCharacters: []string{".", " "},
+		},
+		HoverProvider:              true,
+		DefinitionProvider:         true,
+		DocumentSymbolProvider:     true,
+		DocumentFormattingProvider: true,
+		Workspace: &protocol.ServerCapabilitiesWorkspace{
+			WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
+				Supported:           &trueVal,
+				ChangeNotifications: &protocol.BoolOrString{Value: true},
+			},
+		},
 	}
 
 	version := "dev"
@@ -207,22 +217,23 @@ func (s *Server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 }
 
 // initialized handles the initialized notification.
-func (s *Server) initialized(ctx *glsp.Context, params *protocol.InitializedParams) error {
+func (s *Server) initialized(_ context.Context, params *protocol.InitializedParams) error {
 	s.logger.Info("server initialized")
 	return nil
 }
 
 // shutdown handles the shutdown request.
-func (s *Server) shutdown(ctx *glsp.Context) error {
+// LSP shutdown is a request (returns a response), so it returns (any, error).
+func (s *Server) shutdown(_ context.Context) (any, error) {
 	s.logger.Info("shutdown request received")
 	s.shutdownCalled = true
-	protocol.SetTraceValue(protocol.TraceValueOff)
-	return nil
+	s.traceValue = protocol.TraceValueOff
+	return nil, nil //nolint:nilnil // LSP shutdown response is always null
 }
 
 // exit handles the exit notification per LSP spec.
 // Exit code is 0 if shutdown was called first, 1 otherwise.
-func (s *Server) exit(_ *glsp.Context) error {
+func (s *Server) exit(_ context.Context) error {
 	exitCode := 0
 	if !s.shutdownCalled {
 		s.logger.Warn("exit called without shutdown")
@@ -234,9 +245,9 @@ func (s *Server) exit(_ *glsp.Context) error {
 }
 
 // setTrace handles the $/setTrace notification.
-func (s *Server) setTrace(ctx *glsp.Context, params *protocol.SetTraceParams) error {
-	s.logger.Debug("setTrace", slog.String("value", string(params.Value)))
-	protocol.SetTraceValue(params.Value)
+func (s *Server) setTrace(_ context.Context, params *protocol.SetTraceParams) error {
+	s.logger.Debug("setTrace", slog.String("value", params.Value))
+	s.traceValue = params.Value
 	return nil
 }
 
@@ -244,36 +255,29 @@ func (s *Server) setTrace(ctx *glsp.Context, params *protocol.SetTraceParams) er
 //
 // This method logs cancellation requests for debugging. The current implementation
 // relies on context-based cancellation in ScheduleAnalysis for debounced operations.
-// Full request cancellation (e.g., for long-running completion requests) would
-// require tracking request IDs and their associated contexts.
-func (s *Server) cancelRequest(ctx *glsp.Context, params *protocol.CancelParams) error {
+func (s *Server) cancelRequest(_ context.Context, params *protocol.CancelParams) error {
 	s.logger.Debug("cancelRequest", slog.Any("id", params.ID))
-	// Note: The glsp library handles JSON-RPC level request cancellation.
-	// This handler provides a hook for additional cancellation logic if needed.
 	return nil
 }
 
 // textDocumentDidOpen handles textDocument/didOpen.
-func (s *Server) textDocumentDidOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
+func (s *Server) textDocumentDidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) error {
 	uri := params.TextDocument.URI
 	s.logger.Debug("textDocument/didOpen",
 		slog.String("uri", uri),
 		slog.Int("version", int(params.TextDocument.Version)),
 	)
 
-	var notify Notifier
-	if ctx != nil {
-		notify = func(method string, params any) { ctx.Notify(method, params) }
-	}
+	notify := s.notifier(ctx)
 
 	switch {
 	case isYammmURI(uri):
 		s.workspace.DocumentOpened(uri, int(params.TextDocument.Version), params.TextDocument.Text)
-		s.workspace.AnalyzeAndPublish(notify, context.Background(), uri)
+		s.workspace.AnalyzeAndPublish(notify, context.Background(), uri) //nolint:contextcheck // analysis outlives request
 
 	case isMarkdownURI(uri):
 		s.workspace.MarkdownDocumentOpened(uri, int(params.TextDocument.Version), params.TextDocument.Text)
-		s.workspace.AnalyzeMarkdownAndPublish(notify, context.Background(), uri)
+		s.workspace.AnalyzeMarkdownAndPublish(notify, context.Background(), uri) //nolint:contextcheck // analysis outlives request
 
 	default:
 		s.logger.Debug("ignoring didOpen for unsupported file type", slog.String("uri", uri))
@@ -283,7 +287,7 @@ func (s *Server) textDocumentDidOpen(ctx *glsp.Context, params *protocol.DidOpen
 }
 
 // textDocumentDidChange handles textDocument/didChange.
-func (s *Server) textDocumentDidChange(ctx *glsp.Context, params *protocol.DidChangeTextDocumentParams) error {
+func (s *Server) textDocumentDidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) error {
 	uri := params.TextDocument.URI
 	s.logger.Debug("textDocument/didChange",
 		slog.String("uri", uri),
@@ -309,7 +313,7 @@ func (s *Server) textDocumentDidChange(ctx *glsp.Context, params *protocol.DidCh
 				s.applyIncrementalChanges(params)
 			}
 		}
-		s.workspace.ScheduleAnalysis(ctx, uri)
+		s.workspace.ScheduleAnalysis(s.notifier(ctx), uri) //nolint:contextcheck // Notifier captures ctx; ScheduleAnalysis is fire-and-forget
 
 	case isMarkdownURI(uri):
 		if len(params.ContentChanges) > 0 {
@@ -333,7 +337,7 @@ func (s *Server) textDocumentDidChange(ctx *glsp.Context, params *protocol.DidCh
 				}
 			}
 		}
-		s.workspace.ScheduleMarkdownAnalysis(ctx, uri)
+		s.workspace.ScheduleMarkdownAnalysis(s.notifier(ctx), uri) //nolint:contextcheck // Notifier captures ctx; schedule is fire-and-forget
 
 	default:
 		s.logger.Debug("ignoring didChange for unsupported file type", slog.String("uri", uri))
@@ -438,14 +442,11 @@ func normalizeLineEndings(text string) string {
 }
 
 // textDocumentDidClose handles textDocument/didClose.
-func (s *Server) textDocumentDidClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
+func (s *Server) textDocumentDidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error {
 	uri := params.TextDocument.URI
 	s.logger.Debug("textDocument/didClose", slog.String("uri", uri))
 
-	var notify Notifier
-	if ctx != nil {
-		notify = func(method string, params any) { ctx.Notify(method, params) }
-	}
+	notify := s.notifier(ctx)
 
 	switch {
 	case isYammmURI(uri):
@@ -462,20 +463,20 @@ func (s *Server) textDocumentDidClose(ctx *glsp.Context, params *protocol.DidClo
 }
 
 // workspaceDidChangeWatchedFiles handles workspace/didChangeWatchedFiles.
-func (s *Server) workspaceDidChangeWatchedFiles(ctx *glsp.Context, params *protocol.DidChangeWatchedFilesParams) error {
+func (s *Server) workspaceDidChangeWatchedFiles(ctx context.Context, params *protocol.DidChangeWatchedFilesParams) error {
 	for _, change := range params.Changes {
 		s.logger.Debug("watched file changed",
 			slog.String("uri", change.URI),
 			slog.Int("type", int(change.Type)),
 		)
-		s.workspace.FileChanged(ctx, change.URI, change.Type)
+		s.workspace.FileChanged(s.notifier(ctx), change.URI, change.Type) //nolint:contextcheck // Notifier captures ctx
 	}
 	return nil
 }
 
 // workspaceDidChangeWorkspaceFolders handles workspace/didChangeWorkspaceFolders.
 // This is called when the user adds or removes workspace folders in VS Code.
-func (s *Server) workspaceDidChangeWorkspaceFolders(ctx *glsp.Context, params *protocol.DidChangeWorkspaceFoldersParams) error {
+func (s *Server) workspaceDidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) error {
 	// Process removed folders first to ensure clean state
 	for _, folder := range params.Event.Removed {
 		s.logger.Debug("workspace folder removed", slog.String("uri", folder.URI))
@@ -489,7 +490,7 @@ func (s *Server) workspaceDidChangeWorkspaceFolders(ctx *glsp.Context, params *p
 	}
 
 	// Trigger re-analysis of open documents whose module root may have changed
-	s.workspace.ReanalyzeOpenDocuments(ctx)
+	s.workspace.ReanalyzeOpenDocuments(s.notifier(ctx)) //nolint:contextcheck // Notifier captures ctx
 
 	return nil
 }

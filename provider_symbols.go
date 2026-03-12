@@ -1,10 +1,10 @@
 package lsp
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
@@ -13,7 +13,7 @@ import (
 // textDocumentDocumentSymbol handles textDocument/documentSymbol requests.
 //
 //nolint:nilnil // LSP protocol: nil result means no symbols
-func (s *Server) textDocumentDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbolParams) (any, error) {
+func (s *Server) textDocumentDocumentSymbol(_ context.Context, params *protocol.DocumentSymbolParams) (any, error) {
 	uri := params.TextDocument.URI
 
 	s.logger.Debug("documentSymbol request", "uri", uri)

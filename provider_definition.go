@@ -1,10 +1,10 @@
 package lsp
 
 import (
+	"context"
 	"path/filepath"
 
-	"github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -17,7 +17,7 @@ import (
 // Returns nil, nil when no definition is found (standard LSP behavior).
 //
 //nolint:nilnil // LSP protocol: nil result means "no definition found"
-func (s *Server) textDocumentDefinition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
+func (s *Server) textDocumentDefinition(_ context.Context, params *protocol.DefinitionParams) (any, error) {
 	uri := params.TextDocument.URI
 
 	s.logger.Debug("definition request",

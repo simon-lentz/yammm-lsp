@@ -5,7 +5,7 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 )
 
 // ApplyEdits applies LSP TextEdits to a document string, respecting the

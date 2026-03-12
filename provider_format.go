@@ -4,8 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema/load"
@@ -18,7 +17,7 @@ import (
 // params.Options (FormattingOptions) is intentionally ignored: yammm formatting
 // is canonical (like gofmt) — tabs for indentation, trailing whitespace trimmed,
 // final newline enforced. All style decisions are hardcoded.
-func (s *Server) textDocumentFormatting(_ *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
+func (s *Server) textDocumentFormatting(_ context.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
 	uri := params.TextDocument.URI
 
 	if isMarkdownURI(uri) {
@@ -39,7 +38,7 @@ func (s *Server) textDocumentFormatting(_ *glsp.Context, params *protocol.Docume
 	// should not prevent formatting. This ensures we don't corrupt files with
 	// syntax errors while still allowing formatting for files with imports.
 	ctx := context.Background()
-	_, result, err := load.LoadString(ctx, doc.Text, "format-check")
+	_, result, err := load.LoadString(ctx, doc.Text, "format-check") //nolint:contextcheck // intentional: analysis context is independent of LSP request
 	if err != nil {
 		s.logger.Debug("formatting skipped due to load error",
 			"uri", uri,

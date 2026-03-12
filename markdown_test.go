@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1697,10 +1697,7 @@ func TestMarkdownHover_InCodeBlock(t *testing.T) {
 	}
 
 	// Verify hover content mentions the type
-	mc, ok := result.Contents.(protocol.MarkupContent)
-	if ok {
-		assert.Contains(t, mc.Value, "Foo")
-	}
+	assert.Contains(t, result.Contents.Value, "Foo")
 }
 
 func TestMarkdownHover_SnippetBlock(t *testing.T) {
@@ -1744,10 +1741,7 @@ func TestMarkdownHover_SnippetBlock(t *testing.T) {
 	}
 
 	// Verify hover content mentions the type
-	mc, ok := result.Contents.(protocol.MarkupContent)
-	if ok {
-		assert.Contains(t, mc.Value, "Foo")
-	}
+	assert.Contains(t, result.Contents.Value, "Foo")
 }
 
 func TestMarkdownHover_OutsideBlock(t *testing.T) {

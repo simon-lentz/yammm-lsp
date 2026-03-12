@@ -9,9 +9,9 @@
 //   - Document symbols for outline and breadcrumbs
 //   - Formatting with canonical style (tabs, LF)
 //
-// The server communicates via JSON-RPC 2.0 over stdio and implements
-// LSP 3.16. It leverages the existing schema/load package for analysis
-// to ensure consistency between CLI and editor behavior.
+// The server communicates via JSON-RPC 2.0 over stdio (using creachadair/jrpc2)
+// and implements LSP 3.16. It leverages the existing schema/load package for
+// analysis to ensure consistency between CLI and editor behavior.
 //
 // # Markdown Embedded Blocks
 //
@@ -49,7 +49,7 @@
 //
 // The server implements LSP 3.16, which does not support position encoding
 // negotiation (added in LSP 3.17). UTF-16 encoding is assumed for all
-// character positions. The glsp library does not yet support LSP 3.17.
+// character positions.
 //
 // Documents must be opened (via textDocument/didOpen) before most LSP features
 // work for that document. Specifically, hover, definition, completion, and

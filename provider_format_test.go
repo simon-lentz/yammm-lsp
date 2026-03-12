@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -8,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema/load"
@@ -1321,7 +1322,7 @@ func TestFormatting_UsesTokenStreamFormatterForIntraLineSpacing(t *testing.T) {
 	server := NewServer(logger, Config{ModuleRoot: tmpDir})
 	uri := PathToURI(filePath)
 
-	if err := server.textDocumentDidOpen(nil, &protocol.DidOpenTextDocumentParams{
+	if err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{
 			URI:        uri,
 			LanguageID: "yammm",
@@ -1332,7 +1333,7 @@ func TestFormatting_UsesTokenStreamFormatterForIntraLineSpacing(t *testing.T) {
 		t.Fatalf("textDocumentDidOpen failed: %v", err)
 	}
 
-	edits, err := server.textDocumentFormatting(nil, &protocol.DocumentFormattingParams{
+	edits, err := server.textDocumentFormatting(context.TODO(), &protocol.DocumentFormattingParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: uri},
 	})
 	if err != nil {
@@ -1826,7 +1827,7 @@ func TestFormatting_UTF8PositionEncoding(t *testing.T) {
 
 			// Open the document
 			uri := PathToURI(filePath)
-			err := server.textDocumentDidOpen(nil, &protocol.DidOpenTextDocumentParams{
+			err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
 				TextDocument: protocol.TextDocumentItem{
 					URI:        uri,
 					LanguageID: "yammm",
@@ -1839,7 +1840,7 @@ func TestFormatting_UTF8PositionEncoding(t *testing.T) {
 			}
 
 			// Request formatting
-			edits, err := server.textDocumentFormatting(nil, &protocol.DocumentFormattingParams{
+			edits, err := server.textDocumentFormatting(context.TODO(), &protocol.DocumentFormattingParams{
 				TextDocument: protocol.TextDocumentIdentifier{URI: uri},
 			})
 			if err != nil {

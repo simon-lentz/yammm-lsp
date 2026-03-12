@@ -1,13 +1,14 @@
 package lsp
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm-lsp/testutil"
 	"github.com/simon-lentz/yammm/schema/load"
@@ -19,14 +20,13 @@ func newTestHarness(t *testing.T, root string) *testutil.Harness {
 
 	// Use silent logging for tests
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	silenceCommonLog()
 
 	// Create server with test configuration
 	server := NewServer(logger, Config{
 		ModuleRoot: root,
 	})
 
-	return testutil.NewHarness(t, server.Handler(), root)
+	return testutil.NewHarness(t, server.Mux(), root)
 }
 
 // =============================================================================
@@ -621,7 +621,7 @@ func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 			server.workspace.SetPositionEncoding(tt.encoding)
 
 			uri := PathToURI(filePath)
-			err := server.textDocumentDidOpen(nil, &protocol.DidOpenTextDocumentParams{
+			err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
 				TextDocument: protocol.TextDocumentItem{
 					URI:        uri,
 					LanguageID: "yammm",
@@ -633,7 +633,7 @@ func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 				t.Fatalf("textDocumentDidOpen failed: %v", err)
 			}
 
-			edits, err := server.textDocumentFormatting(nil, &protocol.DocumentFormattingParams{
+			edits, err := server.textDocumentFormatting(context.TODO(), &protocol.DocumentFormattingParams{
 				TextDocument: protocol.TextDocumentIdentifier{URI: uri},
 			})
 			if err != nil {

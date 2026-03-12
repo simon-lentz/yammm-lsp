@@ -9,8 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/load"
@@ -44,8 +43,8 @@ type debounceEntry struct {
 }
 
 // Notifier is a function that sends LSP notifications.
-// This type allows capturing only the notification capability from a glsp.Context,
-// rather than the entire context object. This reduces coupling in closures
+// This type decouples notification sending from transport details.
+// This reduces coupling in closures
 // (e.g., debounce timers) and makes explicit what capability is being captured.
 type Notifier func(method string, params any)
 
@@ -464,7 +463,7 @@ func (w *Workspace) DocumentClosed(notify Notifier, uri string) {
 // ReanalyzeOpenDocuments triggers re-analysis of all open documents.
 // This is called when workspace folders change, as module root selection
 // may have changed for existing documents.
-func (w *Workspace) ReanalyzeOpenDocuments(ctx *glsp.Context) {
+func (w *Workspace) ReanalyzeOpenDocuments(notify Notifier) {
 	w.mu.RLock()
 	uris := make([]string, 0, len(w.open))
 	for uri := range w.open {
@@ -473,12 +472,12 @@ func (w *Workspace) ReanalyzeOpenDocuments(ctx *glsp.Context) {
 	w.mu.RUnlock()
 
 	for _, uri := range uris {
-		w.ScheduleAnalysis(ctx, uri)
+		w.ScheduleAnalysis(notify, uri)
 	}
 }
 
 // ScheduleAnalysis schedules a debounced analysis for the given document.
-func (w *Workspace) ScheduleAnalysis(glspCtx *glsp.Context, uri string) {
+func (w *Workspace) ScheduleAnalysis(notify Notifier, uri string) {
 	w.debounceMu.Lock()
 	defer w.debounceMu.Unlock()
 
@@ -496,18 +495,6 @@ func (w *Workspace) ScheduleAnalysis(glspCtx *glsp.Context, uri string) {
 	// our own entry, not a newer one that may have been scheduled while we were
 	// running analysis.
 	entry := &debounceEntry{cancel: cancel}
-
-	// Extract only the Notify function from the context.
-	// This reduces coupling by capturing only what's needed, rather than
-	// the entire glsp.Context object. The Notify function is bound to
-	// the long-lived connection and handles concurrent writes internally.
-	var notify Notifier
-	if glspCtx != nil {
-		// Wrap glsp.NotifyFunc to match our Notifier type signature
-		notify = func(method string, params any) {
-			glspCtx.Notify(method, params)
-		}
-	}
 
 	// Schedule new analysis, capturing entry pointer for identity check
 	entry.timer = time.AfterFunc(debounceDelay, func() {
@@ -760,7 +747,7 @@ func (w *Workspace) publishDiagnostics(notify Notifier, uri string, diagnostics 
 //
 // The incoming URI is canonicalized before lookup to handle symlink and path
 // variations between what VS Code reports and what we store internally.
-func (w *Workspace) FileChanged(ctx *glsp.Context, uri string, changeType protocol.UInteger) {
+func (w *Workspace) FileChanged(notify Notifier, uri string, changeType protocol.UInteger) {
 	// Canonicalize URI to match how we store reverseDeps keys.
 	// VS Code may report symlinked or case-different paths.
 	// Resolve symlinks to match the loader's canonicalization (makeCanonicalPath).
@@ -788,7 +775,7 @@ func (w *Workspace) FileChanged(ctx *glsp.Context, uri string, changeType protoc
 	w.mu.RUnlock()
 
 	for entryURI := range deps {
-		w.ScheduleAnalysis(ctx, entryURI)
+		w.ScheduleAnalysis(notify, entryURI)
 	}
 }
 
@@ -1215,7 +1202,7 @@ func (w *Workspace) GetMarkdownCurrentText(uri string) (string, bool) {
 }
 
 // ScheduleMarkdownAnalysis schedules a debounced analysis for a markdown document.
-func (w *Workspace) ScheduleMarkdownAnalysis(glspCtx *glsp.Context, uri string) {
+func (w *Workspace) ScheduleMarkdownAnalysis(notify Notifier, uri string) {
 	w.debounceMu.Lock()
 	defer w.debounceMu.Unlock()
 
@@ -1226,13 +1213,6 @@ func (w *Workspace) ScheduleMarkdownAnalysis(glspCtx *glsp.Context, uri string) 
 
 	analyzeCtx, cancel := context.WithCancel(context.Background())
 	entry := &debounceEntry{cancel: cancel}
-
-	var notify Notifier
-	if glspCtx != nil {
-		notify = func(method string, params any) {
-			glspCtx.Notify(method, params)
-		}
-	}
 
 	entry.timer = time.AfterFunc(debounceDelay, func() {
 		select {

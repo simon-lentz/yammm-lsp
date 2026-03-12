@@ -1,11 +1,12 @@
 package lsp
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"testing"
 
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 )
 
 func TestNewServer(t *testing.T) {
@@ -25,8 +26,8 @@ func TestNewServer(t *testing.T) {
 	if server.workspace == nil {
 		t.Error("server.workspace is nil")
 	}
-	if server.server == nil {
-		t.Error("server.server is nil")
+	if server.mux == nil {
+		t.Error("server.mux is nil")
 	}
 	if server.config.ModuleRoot != "/test/root" {
 		t.Errorf("config.ModuleRoot = %q; want /test/root", server.config.ModuleRoot)
@@ -254,7 +255,7 @@ func TestDidChange_MultipleFullSyncChanges(t *testing.T) {
 		},
 	}
 
-	err := server.textDocumentDidChange(nil, params)
+	err := server.textDocumentDidChange(context.TODO(), params)
 	if err != nil {
 		t.Fatalf("textDocumentDidChange failed: %v", err)
 	}

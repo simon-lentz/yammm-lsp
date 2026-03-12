@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 )
 
 // AssertHoverContains checks that hover result contains expected text.
@@ -15,13 +15,8 @@ func AssertHoverContains(t *testing.T, hover *protocol.Hover, expectedText strin
 		t.Fatal("expected hover result, got nil")
 	}
 
-	content, ok := hover.Contents.(protocol.MarkupContent)
-	if !ok {
-		t.Fatalf("expected MarkupContent, got %T", hover.Contents)
-	}
-
-	if !strings.Contains(content.Value, expectedText) {
-		t.Errorf("hover content %q does not contain %q", content.Value, expectedText)
+	if !strings.Contains(hover.Contents.Value, expectedText) {
+		t.Errorf("hover content %q does not contain %q", hover.Contents.Value, expectedText)
 	}
 }
 
@@ -33,13 +28,8 @@ func AssertHoverKind(t *testing.T, hover *protocol.Hover, expectedKind protocol.
 		t.Fatal("expected hover result, got nil")
 	}
 
-	content, ok := hover.Contents.(protocol.MarkupContent)
-	if !ok {
-		t.Fatalf("expected MarkupContent, got %T", hover.Contents)
-	}
-
-	if content.Kind != expectedKind {
-		t.Errorf("hover kind = %q; want %q", content.Kind, expectedKind)
+	if hover.Contents.Kind != expectedKind {
+		t.Errorf("hover kind = %q; want %q", hover.Contents.Kind, expectedKind)
 	}
 }
 
@@ -96,11 +86,6 @@ func extractCompletionItems(t *testing.T, result any) []protocol.CompletionItem 
 		return nil
 	case []protocol.CompletionItem:
 		return v
-	case *protocol.CompletionList:
-		if v == nil {
-			return nil
-		}
-		return v.Items
 	default:
 		t.Fatalf("unexpected completion result type: %T", result)
 		return nil
@@ -143,8 +128,6 @@ func findSymbolRecursive(symbols []protocol.DocumentSymbol, name string) bool {
 }
 
 // extractDocumentSymbols extracts document symbols from a result.
-// Supports both DocumentSymbol (hierarchical) and SymbolInformation (flat) formats.
-// SymbolInformation is converted to DocumentSymbol for uniform assertion handling.
 func extractDocumentSymbols(t *testing.T, result any) []protocol.DocumentSymbol {
 	t.Helper()
 
@@ -153,18 +136,6 @@ func extractDocumentSymbols(t *testing.T, result any) []protocol.DocumentSymbol 
 		return nil
 	case []protocol.DocumentSymbol:
 		return v
-	case []protocol.SymbolInformation:
-		// Convert SymbolInformation to DocumentSymbol (flat list, no hierarchy)
-		symbols := make([]protocol.DocumentSymbol, len(v))
-		for i, si := range v {
-			symbols[i] = protocol.DocumentSymbol{
-				Name:           si.Name,
-				Kind:           si.Kind,
-				Range:          si.Location.Range,
-				SelectionRange: si.Location.Range,
-			}
-		}
-		return symbols
 	case []any:
 		symbols := make([]protocol.DocumentSymbol, 0, len(v))
 		for _, item := range v {

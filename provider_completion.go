@@ -2,11 +2,11 @@ package lsp
 
 import (
 	"cmp"
+	"context"
 	"slices"
 	"strings"
 
-	"github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -46,7 +46,7 @@ var builtinTypes = []string{
 // textDocumentCompletion handles textDocument/completion requests.
 //
 //nolint:nilnil // LSP protocol: nil result means no completions
-func (s *Server) textDocumentCompletion(_ *glsp.Context, params *protocol.CompletionParams) (any, error) {
+func (s *Server) textDocumentCompletion(_ context.Context, params *protocol.CompletionParams) (any, error) {
 	uri := params.TextDocument.URI
 
 	s.logger.Debug("completion request",

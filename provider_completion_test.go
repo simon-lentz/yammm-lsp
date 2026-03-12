@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -9,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	protocol "github.com/tliron/glsp/protocol_3_16"
+	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -954,10 +955,9 @@ type 人物 {
 	server.workspace.SetPositionEncoding(PositionEncodingUTF8)
 
 	// Open the document and trigger analysis via textDocumentDidOpen.
-	// Using nil context is safe - publishSnapshotDiagnostics is a no-op when ctx == nil.
 	// This ensures LatestSnapshot(uri) returns a non-nil snapshot.
 	uri := PathToURI(filePath)
-	err := server.textDocumentDidOpen(nil, &protocol.DidOpenTextDocumentParams{
+	err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{
 			URI:        uri,
 			LanguageID: "yammm",
@@ -1009,7 +1009,7 @@ type 人物 {
 				},
 			}
 
-			result, err := server.textDocumentCompletion(nil, params)
+			result, err := server.textDocumentCompletion(context.TODO(), params)
 			if err != nil {
 				t.Fatalf("completion failed: %v", err)
 			}
@@ -1063,9 +1063,8 @@ type Person {
 	server.workspace.SetPositionEncoding(PositionEncodingUTF8)
 
 	// Open the document and trigger analysis via textDocumentDidOpen.
-	// Using nil context is safe - publishSnapshotDiagnostics is a no-op when ctx == nil.
 	uri := PathToURI(filePath)
-	err := server.textDocumentDidOpen(nil, &protocol.DidOpenTextDocumentParams{
+	err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{
 			URI:        uri,
 			LanguageID: "yammm",
@@ -1089,7 +1088,7 @@ type Person {
 	}
 
 	// Should not panic and should return valid completions
-	result, err := server.textDocumentCompletion(nil, params)
+	result, err := server.textDocumentCompletion(context.TODO(), params)
 	if err != nil {
 		t.Fatalf("completion failed: %v", err)
 	}
