@@ -8,6 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/source"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
@@ -436,7 +437,7 @@ func TestSpanToLSPRange_Conversion(t *testing.T) {
 	span := location.Range(sourceID, 5, 10, 7, 20) // 1-based
 
 	// SpanToLSPRange falls back to rune column conversion when source is not registered
-	start, end, ok := SpanToLSPRange(sources, span, PositionEncodingUTF16)
+	start, end, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF16)
 	if !ok {
 		t.Fatal("SpanToLSPRange returned !ok")
 	}
@@ -459,10 +460,6 @@ func TestSpanToLSPRange_Conversion(t *testing.T) {
 		t.Errorf("End.Character = %d; want 19 (0-based)", endChar)
 	}
 }
-
-// =============================================================================
-// Datatype Symbol Tests (Priority 5: Test Coverage Gaps)
-// =============================================================================
 
 func TestExtractSymbols_WithDataType(t *testing.T) {
 	t.Parallel()

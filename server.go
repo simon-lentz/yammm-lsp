@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/creachadair/jrpc2"
 	"github.com/creachadair/jrpc2/channel"
@@ -17,12 +18,6 @@ import (
 
 	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 )
-
-// isMarkdownURI delegates to lsputil.IsMarkdownURI.
-var isMarkdownURI = lsputil.IsMarkdownURI
-
-// isYammmURI delegates to lsputil.IsYammmURI.
-var isYammmURI = lsputil.IsYammmURI
 
 const (
 	serverName = "yammm-lsp"
@@ -98,9 +93,9 @@ func NewServer(logger *slog.Logger, cfg Config) *Server {
 // Mux returns the handler map for testing purposes.
 func (s *Server) Mux() handler.Map { return s.mux }
 
-// notifier creates a Notifier from a jrpc2 handler context.
+// notifier creates a notifyFunc from a jrpc2 handler context.
 // Returns nil if ctx has no jrpc2 server (e.g., in unit tests).
-func (s *Server) notifier(ctx context.Context) Notifier {
+func (s *Server) notifier(ctx context.Context) notifyFunc {
 	srv := recoverServerFromContext(ctx)
 	if srv == nil {
 		return nil
@@ -154,11 +149,19 @@ func (s *Server) Close() error {
 	return s.closeErr
 }
 
+// logTiming logs elapsed time for an LSP request at debug level.
+func (s *Server) logTiming(method string, start time.Time) {
+	s.logger.Debug("request completed",
+		slog.String("method", method),
+		slog.Duration("elapsed", time.Since(start)),
+	)
+}
+
 // initialize handles the initialize request.
 func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams) (any, error) {
 	s.logger.Info("initialize request received",
-		slog.String("client_name", s.clientName(params)),
-		slog.String("root_uri", s.rootURI(params)),
+		slog.String("client_name", clientName(params)),
+		slog.String("root_uri", rootURI(params)),
 	)
 
 	// Log client capabilities summary
@@ -175,7 +178,7 @@ func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams
 		s.workspace.AddRoot(*params.RootURI)
 	case params.RootPath != nil:
 		// Fallback for older LSP clients that only provide RootPath
-		s.workspace.AddRoot(PathToURI(*params.RootPath))
+		s.workspace.AddRoot(lsputil.PathToURI(*params.RootPath))
 	}
 
 	// Use UTF-16 encoding (default for VS Code compatibility)
@@ -271,13 +274,13 @@ func (s *Server) textDocumentDidOpen(ctx context.Context, params *protocol.DidOp
 	notify := s.notifier(ctx)
 
 	switch {
-	case isYammmURI(uri):
+	case lsputil.IsYammmURI(uri):
 		s.workspace.DocumentOpened(uri, int(params.TextDocument.Version), params.TextDocument.Text)
-		s.workspace.AnalyzeAndPublish(notify, context.Background(), uri) //nolint:contextcheck // analysis outlives request
+		s.workspace.AnalyzeAndPublish(notify, s.workspace.BackgroundContext(), uri) //nolint:contextcheck // analysis outlives request
 
-	case isMarkdownURI(uri):
+	case lsputil.IsMarkdownURI(uri):
 		s.workspace.MarkdownDocumentOpened(uri, int(params.TextDocument.Version), params.TextDocument.Text)
-		s.workspace.AnalyzeMarkdownAndPublish(notify, context.Background(), uri) //nolint:contextcheck // analysis outlives request
+		s.workspace.AnalyzeMarkdownAndPublish(notify, s.workspace.BackgroundContext(), uri) //nolint:contextcheck // analysis outlives request
 
 	default:
 		s.logger.Debug("ignoring didOpen for unsupported file type", slog.String("uri", uri))
@@ -295,7 +298,7 @@ func (s *Server) textDocumentDidChange(ctx context.Context, params *protocol.Did
 	)
 
 	switch {
-	case isYammmURI(uri):
+	case lsputil.IsYammmURI(uri):
 		// Existing .yammm path
 		if len(params.ContentChanges) > 0 {
 			var lastFullChange *protocol.TextDocumentContentChangeEventWhole
@@ -313,9 +316,9 @@ func (s *Server) textDocumentDidChange(ctx context.Context, params *protocol.Did
 				s.applyIncrementalChanges(params)
 			}
 		}
-		s.workspace.ScheduleAnalysis(s.notifier(ctx), uri) //nolint:contextcheck // Notifier captures ctx; ScheduleAnalysis is fire-and-forget
+		s.workspace.ScheduleAnalysis(s.notifier(ctx), uri) //nolint:contextcheck // notifyFunc captures ctx; ScheduleAnalysis is fire-and-forget
 
-	case isMarkdownURI(uri):
+	case lsputil.IsMarkdownURI(uri):
 		if len(params.ContentChanges) > 0 {
 			var lastFullChange *protocol.TextDocumentContentChangeEventWhole
 			for _, rawChange := range params.ContentChanges {
@@ -337,7 +340,7 @@ func (s *Server) textDocumentDidChange(ctx context.Context, params *protocol.Did
 				}
 			}
 		}
-		s.workspace.ScheduleMarkdownAnalysis(s.notifier(ctx), uri) //nolint:contextcheck // Notifier captures ctx; schedule is fire-and-forget
+		s.workspace.ScheduleMarkdownAnalysis(s.notifier(ctx), uri) //nolint:contextcheck // notifyFunc captures ctx; schedule is fire-and-forget
 
 	default:
 		s.logger.Debug("ignoring didChange for unsupported file type", slog.String("uri", uri))
@@ -422,7 +425,7 @@ func rangeToByteOffset(lines []string, line, char int, enc PositionEncoding) int
 			charOffset = min(char, len(lineContent))
 		default:
 			// UTF-16 encoding (default): convert from UTF-16 code units to bytes
-			charOffset = utf16CharToByteOffset(lineContent, 0, char)
+			charOffset = lsputil.UTF16CharToByteOffset(lineContent, 0, char)
 		}
 		offset += charOffset
 	}
@@ -449,10 +452,10 @@ func (s *Server) textDocumentDidClose(ctx context.Context, params *protocol.DidC
 	notify := s.notifier(ctx)
 
 	switch {
-	case isYammmURI(uri):
+	case lsputil.IsYammmURI(uri):
 		s.workspace.DocumentClosed(notify, uri)
 
-	case isMarkdownURI(uri):
+	case lsputil.IsMarkdownURI(uri):
 		s.workspace.MarkdownDocumentClosed(notify, uri)
 
 	default:
@@ -469,7 +472,7 @@ func (s *Server) workspaceDidChangeWatchedFiles(ctx context.Context, params *pro
 			slog.String("uri", change.URI),
 			slog.Int("type", int(change.Type)),
 		)
-		s.workspace.FileChanged(s.notifier(ctx), change.URI, change.Type) //nolint:contextcheck // Notifier captures ctx
+		s.workspace.FileChanged(s.notifier(ctx), change.URI, change.Type) //nolint:contextcheck // notifyFunc captures ctx
 	}
 	return nil
 }
@@ -490,14 +493,14 @@ func (s *Server) workspaceDidChangeWorkspaceFolders(ctx context.Context, params 
 	}
 
 	// Trigger re-analysis of open documents whose module root may have changed
-	s.workspace.ReanalyzeOpenDocuments(s.notifier(ctx)) //nolint:contextcheck // Notifier captures ctx
+	s.workspace.ReanalyzeOpenDocuments(s.notifier(ctx)) //nolint:contextcheck // notifyFunc captures ctx
 
 	return nil
 }
 
 // Helper functions
 
-func (s *Server) clientName(params *protocol.InitializeParams) string {
+func clientName(params *protocol.InitializeParams) string {
 	if params.ClientInfo != nil {
 		if params.ClientInfo.Version != nil {
 			return params.ClientInfo.Name + " " + *params.ClientInfo.Version
@@ -507,7 +510,7 @@ func (s *Server) clientName(params *protocol.InitializeParams) string {
 	return "unknown"
 }
 
-func (s *Server) rootURI(params *protocol.InitializeParams) string {
+func rootURI(params *protocol.InitializeParams) string {
 	if params.RootURI != nil {
 		return *params.RootURI
 	}

@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"path/filepath"
+	"time"
 
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
@@ -18,6 +20,7 @@ import (
 //
 //nolint:nilnil // LSP protocol: nil result means "no definition found"
 func (s *Server) textDocumentDefinition(_ context.Context, params *protocol.DefinitionParams) (any, error) {
+	defer s.logTiming("textDocument/definition", time.Now())
 	uri := params.TextDocument.URI
 
 	s.logger.Debug("definition request",
@@ -49,7 +52,7 @@ func (s *Server) textDocumentDefinition(_ context.Context, params *protocol.Defi
 // markdownDefinition handles definition requests within yammm code blocks in markdown files.
 //
 //nolint:nilnil // LSP protocol: nil result means "no definition found"
-func (s *Server) markdownDefinition(params *protocol.DefinitionParams, mdSnap *MarkdownDocumentSnapshot) (any, error) {
+func (s *Server) markdownDefinition(params *protocol.DefinitionParams, mdSnap *markdownDocumentSnapshot) (any, error) {
 	blockPos := mdSnap.MarkdownPositionToBlock(int(params.Position.Line), int(params.Position.Character))
 	if blockPos == nil {
 		return nil, nil
@@ -78,7 +81,7 @@ func (s *Server) markdownDefinition(params *protocol.DefinitionParams, mdSnap *M
 	// Decode the location URI to check if it matches our virtual block path.
 	// symbolToLocation calls RemapPathToURI which percent-encodes '#' in virtual
 	// paths (e.g., /path/to/README.md%23block-0). URIToPath reverses this.
-	locPath, pathErr := URIToPath(loc.URI)
+	locPath, pathErr := lsputil.URIToPath(loc.URI)
 	if pathErr == nil && filepath.ToSlash(locPath) == block.SourceID.String() {
 		loc.URI = mdSnap.URI
 		startLine, startChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
@@ -99,7 +102,7 @@ func (s *Server) markdownDefinition(params *protocol.DefinitionParams, mdSnap *M
 // Returns nil, nil when no definition is found.
 //
 //nolint:nilnil // LSP protocol: nil result means "no definition found"
-func (s *Server) definitionAtPosition(snapshot *analysis.Snapshot, doc *DocumentSnapshot, line, char int) (any, error) {
+func (s *Server) definitionAtPosition(snapshot *analysis.Snapshot, doc *documentSnapshot, line, char int) (any, error) {
 	if snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for definition",
 			"uri", doc.URI,
@@ -114,7 +117,7 @@ func (s *Server) definitionAtPosition(snapshot *analysis.Snapshot, doc *Document
 		return nil, nil
 	}
 
-	internalPos, ok := PositionFromLSP(
+	internalPos, ok := lsputil.PositionFromLSP(
 		snapshot.Sources,
 		doc.SourceID,
 		line,
@@ -176,7 +179,7 @@ func (s *Server) resolveSymbolDefinition(snapshot *analysis.Snapshot, sym *symbo
 			schemaSpan := importedSchema.Span()
 
 			// Try proper UTF-16 conversion if sources are available
-			start, end, ok := SpanToLSPRange(snapshot.Sources, schemaSpan, s.workspace.PositionEncoding())
+			start, end, ok := lsputil.SpanToLSPRange(snapshot.Sources, schemaSpan, s.workspace.PositionEncoding())
 			if ok {
 				return &protocol.Location{
 					URI: uri,
@@ -229,7 +232,7 @@ func (s *Server) symbolToLocation(snapshot *analysis.Snapshot, sym *symbols.Symb
 	uri := s.workspace.RemapPathToURI(sym.SourceID.String())
 
 	// Use proper UTF-16 conversion for the range
-	start, end, ok := SpanToLSPRange(snapshot.Sources, sym.Selection, s.workspace.PositionEncoding())
+	start, end, ok := lsputil.SpanToLSPRange(snapshot.Sources, sym.Selection, s.workspace.PositionEncoding())
 	if !ok {
 		// Fallback to naive conversion if span conversion fails
 		return &protocol.Location{

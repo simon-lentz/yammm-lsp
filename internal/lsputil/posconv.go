@@ -43,7 +43,7 @@ func ByteOffsetFromLSP(sources *source.Registry, id location.SourceID, line, cha
 	case PositionEncodingUTF8:
 		// UTF-8 encoding: character offset IS byte offset from line start
 		// Clamp to end-of-line (not end-of-file) to match UTF16CharToByteOffset behavior
-		return clampToLineEnd(content, lineStart, lineStart+char), true
+		return ClampToLineEnd(content, lineStart, lineStart+char), true
 	default:
 		return UTF16CharToByteOffset(content, lineStart, char), true // default UTF-16
 	}
@@ -91,14 +91,14 @@ func UTF16CharToByteOffset(content []byte, lineStart, charOffset int) int {
 	return pos
 }
 
-// clampToLineEnd ensures offset doesn't exceed the end of the current line.
+// ClampToLineEnd ensures offset doesn't exceed the end of the current line.
 // Returns the lesser of: offset, position of next newline, or content length.
 // This is used for UTF-8 encoding mode to match the behavior of UTF16CharToByteOffset
 // which stops at newline boundaries.
 //
 // For conceptual correctness, offsets before lineStart are clamped to lineStart
 // (though LSP inputs should never be negative).
-func clampToLineEnd(content []byte, lineStart, offset int) int {
+func ClampToLineEnd(content []byte, lineStart, offset int) int {
 	if offset < lineStart {
 		return lineStart
 	}

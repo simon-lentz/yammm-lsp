@@ -1099,10 +1099,6 @@ func WrapLongLines(text string) string {
 	return strings.Join(result, "\n")
 }
 
-// =============================================================================
-// Enum Wrapping / Collapsing
-// =============================================================================
-
 // isMultilineEnumStart checks if a line starts a multiline Enum (has `Enum[`
 // with unbalanced brackets) but is NOT a datatype alias (no ` = Enum[`).
 func isMultilineEnumStart(line string) bool {
@@ -1439,10 +1435,6 @@ func tryCollapseEnum(collected []string) []string {
 	return buildWrappedEnum(indent, prefix, values, suffix)
 }
 
-// =============================================================================
-// Extends Wrapping / Collapsing
-// =============================================================================
-
 // isMultilineExtendsStart checks if a line is an extends header without `{` on the same line.
 func isMultilineExtendsStart(line string) bool {
 	trimmed := strings.TrimSpace(line)
@@ -1598,10 +1590,6 @@ func collapseMultilineExtends(lines []string, startIdx int) ([]string, int) {
 	// Re-emit canonical multiline
 	return buildWrappedExtends(indent, header, types), i
 }
-
-// =============================================================================
-// Datatype Alias Enum Wrapping / Collapsing
-// =============================================================================
 
 // tryWrapDatatypeAliasEnum attempts to wrap a long single-line datatype alias Enum.
 func tryWrapDatatypeAliasEnum(line string) ([]string, bool) {

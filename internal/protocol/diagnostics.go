@@ -29,6 +29,7 @@ type DiagnosticRelatedInformation struct {
 // PublishDiagnosticsParams are the parameters of the textDocument/publishDiagnostics notification.
 type PublishDiagnosticsParams struct {
 	URI         string       `json:"uri"`
+	Version     *Integer     `json:"version,omitempty"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 

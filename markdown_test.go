@@ -11,6 +11,8 @@ import (
 
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -744,7 +746,7 @@ func TestMarkdownPositionToBlock(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			snap := &MarkdownDocumentSnapshot{Blocks: tt.blocks}
+			snap := &markdownDocumentSnapshot{Blocks: tt.blocks}
 			pos := snap.MarkdownPositionToBlock(tt.line, tt.char)
 
 			if tt.wantNil {
@@ -823,7 +825,7 @@ func TestBlockPositionToMarkdown(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			snap := &MarkdownDocumentSnapshot{Blocks: tt.blocks}
+			snap := &markdownDocumentSnapshot{Blocks: tt.blocks}
 			line, char := snap.BlockPositionToMarkdown(tt.blockIndex, tt.localLine, tt.localChar)
 			assert.Equal(t, tt.wantLine, line)
 			assert.Equal(t, tt.wantChar, char)
@@ -872,7 +874,7 @@ func TestMarkdownPositionToBlock_WithPrefixLines(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			snap := &MarkdownDocumentSnapshot{Blocks: tt.blocks}
+			snap := &markdownDocumentSnapshot{Blocks: tt.blocks}
 			pos := snap.MarkdownPositionToBlock(tt.line, tt.char)
 
 			if tt.wantNil {
@@ -939,7 +941,7 @@ func TestBlockPositionToMarkdown_WithPrefixLines(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			snap := &MarkdownDocumentSnapshot{Blocks: tt.blocks}
+			snap := &markdownDocumentSnapshot{Blocks: tt.blocks}
 			line, char := snap.BlockPositionToMarkdown(tt.blockIndex, tt.localLine, tt.localChar)
 			assert.Equal(t, tt.wantLine, line)
 			assert.Equal(t, tt.wantChar, char)
@@ -950,7 +952,7 @@ func TestBlockPositionToMarkdown_WithPrefixLines(t *testing.T) {
 func TestPositionConversion_RoundTrip_WithPrefixLines(t *testing.T) {
 	t.Parallel()
 
-	snap := &MarkdownDocumentSnapshot{
+	snap := &markdownDocumentSnapshot{
 		Blocks: []markdown.CodeBlock{
 			{StartLine: 5, EndLine: 10, PrefixLines: 1},
 			{StartLine: 15, EndLine: 20, PrefixLines: 0},
@@ -986,7 +988,7 @@ func TestPositionConversion_RoundTrip_WithPrefixLines(t *testing.T) {
 func TestPositionConversion_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	snap := &MarkdownDocumentSnapshot{
+	snap := &markdownDocumentSnapshot{
 		Blocks: []markdown.CodeBlock{
 			{StartLine: 3, EndLine: 8},
 			{StartLine: 12, EndLine: 15},
@@ -1040,7 +1042,7 @@ func TestIsMarkdownURI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, isMarkdownURI(tt.uri))
+			assert.Equal(t, tt.want, lsputil.IsMarkdownURI(tt.uri))
 		})
 	}
 }
@@ -1062,7 +1064,7 @@ func TestIsYammmURI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, isYammmURI(tt.uri))
+			assert.Equal(t, tt.want, lsputil.IsYammmURI(tt.uri))
 		})
 	}
 }
@@ -1507,7 +1509,7 @@ func testServerWithLogger() *Server {
 }
 
 // analyzeMarkdownForTest opens a markdown document, runs analysis, and returns the snapshot.
-func analyzeMarkdownForTest(t *testing.T, s *Server, uri, content string) *MarkdownDocumentSnapshot {
+func analyzeMarkdownForTest(t *testing.T, s *Server, uri, content string) *markdownDocumentSnapshot {
 	t.Helper()
 	s.workspace.MarkdownDocumentOpened(uri, 1, content)
 	s.workspace.AnalyzeMarkdownAndPublish(nil, t.Context(), uri)
@@ -1520,7 +1522,7 @@ func TestBuildBlockDocumentSnapshot(t *testing.T) {
 	t.Parallel()
 
 	s := testServerWithLogger()
-	mdSnap := &MarkdownDocumentSnapshot{
+	mdSnap := &markdownDocumentSnapshot{
 		URI:     "file:///test/doc.md",
 		Version: 42,
 		Blocks: []markdown.CodeBlock{
@@ -1544,11 +1546,11 @@ func TestBuildBlockDocumentSnapshot(t *testing.T) {
 	assert.Equal(t, id, docSnap.SourceID, "SourceID should come from block")
 	assert.Equal(t, 42, docSnap.Version, "Version should come from mdSnap")
 	assert.Equal(t, mdSnap.Blocks[0].Content, docSnap.Text, "Text should be block content")
-	require.NotNil(t, docSnap.LineState, "LineState should be computed")
-	assert.Equal(t, 42, docSnap.LineState.Version, "LineState version should match mdSnap")
+	require.NotNil(t, docSnap.lineState, "lineState should be computed")
+	assert.Equal(t, 42, docSnap.lineState.Version, "lineState version should match mdSnap")
 
 	// The block content has 5 lines, so BraceDepth should have 5 entries
-	assert.Len(t, docSnap.LineState.BraceDepth, 5, "BraceDepth should have one entry per line")
+	assert.Len(t, docSnap.lineState.BraceDepth, 5, "BraceDepth should have one entry per line")
 }
 
 func TestRemapDocumentSymbolRanges(t *testing.T) {
@@ -1644,7 +1646,7 @@ func TestRemapDocumentSymbolRanges(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			mdSnap := &MarkdownDocumentSnapshot{Blocks: tt.blocks}
+			mdSnap := &markdownDocumentSnapshot{Blocks: tt.blocks}
 			result := remapDocumentSymbolRanges(tt.symbols, mdSnap, tt.blockIndex)
 
 			if tt.wantNil {
@@ -1770,11 +1772,11 @@ func TestMarkdownCompletion_NilSnapshot(t *testing.T) {
 
 	s := testServerWithLogger()
 
-	// Construct a MarkdownDocumentSnapshot with a nil snapshot
+	// Construct a markdownDocumentSnapshot with a nil snapshot
 	id, err := markdown.VirtualSourceID("/test/completion.md", 0)
 	require.NoError(t, err)
 
-	mdSnap := &MarkdownDocumentSnapshot{
+	mdSnap := &markdownDocumentSnapshot{
 		URI:     "file:///test/completion.md",
 		Version: 1,
 		Blocks: []markdown.CodeBlock{
@@ -1897,7 +1899,7 @@ func TestMarkdownDocumentSymbols_NilSnapshots(t *testing.T) {
 
 	s := testServerWithLogger()
 
-	mdSnap := &MarkdownDocumentSnapshot{
+	mdSnap := &markdownDocumentSnapshot{
 		URI:     "file:///test/nil_snap.md",
 		Version: 1,
 		Blocks: []markdown.CodeBlock{
@@ -1915,8 +1917,8 @@ func TestMarkdownFormatting_ReturnsEmpty(t *testing.T) {
 	t.Parallel()
 
 	// Verify isMarkdownURI returns true, which causes early return
-	assert.True(t, isMarkdownURI("file:///test/doc.md"))
-	assert.True(t, isMarkdownURI("file:///test/doc.markdown"))
+	assert.True(t, lsputil.IsMarkdownURI("file:///test/doc.md"))
+	assert.True(t, lsputil.IsMarkdownURI("file:///test/doc.markdown"))
 
 	// The guard in textDocumentFormatting returns []protocol.TextEdit{}
 	// for markdown URIs. We test the guard behavior directly since

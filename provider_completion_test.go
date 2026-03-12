@@ -16,18 +16,18 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
-// textToDoc creates a minimal DocumentSnapshot for testing detectCompletionContext.
-// LineState is nil so tests exercise the fallback path (isInsideTypeBodyDirect).
-func textToDoc(text string) *DocumentSnapshot {
-	return &DocumentSnapshot{Text: text}
+// textToDoc creates a minimal documentSnapshot for testing detectCompletionContext.
+// lineState is nil so tests exercise the fallback path (isInsideTypeBodyDirect).
+func textToDoc(text string) *documentSnapshot {
+	return &documentSnapshot{Text: text}
 }
 
 func TestDetectCompletionContext_TopLevel(t *testing.T) {
 	t.Parallel()
-
 	s := &Server{}
 
 	tests := []struct {
@@ -35,28 +35,28 @@ func TestDetectCompletionContext_TopLevel(t *testing.T) {
 		text     string
 		line     int
 		char     int
-		expected CompletionContext
+		expected completionContext
 	}{
 		{
 			name:     "empty file",
 			text:     "",
 			line:     0,
 			char:     0,
-			expected: ContextTopLevel,
+			expected: contextTopLevel,
 		},
 		{
 			name:     "after schema declaration",
 			text:     "schema \"test\"\n\n",
 			line:     2,
 			char:     0,
-			expected: ContextTopLevel,
+			expected: contextTopLevel,
 		},
 		{
 			name:     "beginning of line after import",
 			text:     "schema \"test\"\nimport \"./foo\" as foo\n\n",
 			line:     3,
 			char:     0,
-			expected: ContextTopLevel,
+			expected: contextTopLevel,
 		},
 	}
 
@@ -73,7 +73,6 @@ func TestDetectCompletionContext_TopLevel(t *testing.T) {
 
 func TestDetectCompletionContext_TypeBody(t *testing.T) {
 	t.Parallel()
-
 	s := &Server{}
 
 	tests := []struct {
@@ -81,28 +80,28 @@ func TestDetectCompletionContext_TypeBody(t *testing.T) {
 		text     string
 		line     int
 		char     int
-		expected CompletionContext
+		expected completionContext
 	}{
 		{
 			name:     "inside type braces",
 			text:     "type Person {\n    \n}",
 			line:     1,
 			char:     4,
-			expected: ContextTypeBody,
+			expected: contextTypeBody,
 		},
 		{
 			name:     "after opening brace",
 			text:     "type Person {\n",
 			line:     1,
 			char:     0,
-			expected: ContextTypeBody,
+			expected: contextTypeBody,
 		},
 		{
 			name:     "nested in type with properties",
 			text:     "type Person {\n    name String\n    \n}",
 			line:     2,
 			char:     4,
-			expected: ContextTypeBody,
+			expected: contextTypeBody,
 		},
 	}
 
@@ -119,7 +118,6 @@ func TestDetectCompletionContext_TypeBody(t *testing.T) {
 
 func TestDetectCompletionContext_Extends(t *testing.T) {
 	t.Parallel()
-
 	s := &Server{}
 
 	tests := []struct {
@@ -127,21 +125,21 @@ func TestDetectCompletionContext_Extends(t *testing.T) {
 		text     string
 		line     int
 		char     int
-		expected CompletionContext
+		expected completionContext
 	}{
 		{
 			name:     "after extends keyword",
 			text:     "type Car extends ",
 			line:     0,
 			char:     17,
-			expected: ContextExtends,
+			expected: contextExtends,
 		},
 		{
 			name:     "after extends with partial",
 			text:     "type Car extends Ve",
 			line:     0,
 			char:     19,
-			expected: ContextExtends,
+			expected: contextExtends,
 		},
 	}
 
@@ -158,7 +156,6 @@ func TestDetectCompletionContext_Extends(t *testing.T) {
 
 func TestDetectCompletionContext_PropertyType(t *testing.T) {
 	t.Parallel()
-
 	s := &Server{}
 
 	tests := []struct {
@@ -166,14 +163,14 @@ func TestDetectCompletionContext_PropertyType(t *testing.T) {
 		text     string
 		line     int
 		char     int
-		expected CompletionContext
+		expected completionContext
 	}{
 		{
 			name:     "after property name with space",
 			text:     "type Person {\n    name ",
 			line:     1,
 			char:     9,
-			expected: ContextPropertyType,
+			expected: contextPropertyType,
 		},
 	}
 
@@ -190,7 +187,6 @@ func TestDetectCompletionContext_PropertyType(t *testing.T) {
 
 func TestDetectCompletionContext_RelationTarget(t *testing.T) {
 	t.Parallel()
-
 	s := &Server{}
 
 	tests := []struct {
@@ -198,21 +194,21 @@ func TestDetectCompletionContext_RelationTarget(t *testing.T) {
 		text     string
 		line     int
 		char     int
-		expected CompletionContext
+		expected completionContext
 	}{
 		{
 			name:     "after association arrow and multiplicity",
 			text:     "type Person {\n    --> ADDRESSES (many) ",
 			line:     1,
 			char:     28,
-			expected: ContextRelationTarget,
+			expected: contextRelationTarget,
 		},
 		{
 			name:     "after composition arrow and multiplicity",
 			text:     "type Car {\n    *-> WHEELS (many) ",
 			line:     1,
 			char:     22,
-			expected: ContextRelationTarget,
+			expected: contextRelationTarget,
 		},
 	}
 
@@ -229,20 +225,19 @@ func TestDetectCompletionContext_RelationTarget(t *testing.T) {
 
 func TestDetectCompletionContext_Import(t *testing.T) {
 	t.Parallel()
-
 	s := &Server{}
 
 	text := "import "
 	result := s.detectCompletionContext(textToDoc(text), 0, 7)
-	if result != ContextImportPath {
-		t.Errorf("detectCompletionContext() = %v; want %v", result, ContextImportPath)
+	if result != contextImportPath {
+		t.Errorf("detectCompletionContext() = %v; want %v", result, contextImportPath)
 	}
 }
 
 func TestTopLevelCompletions(t *testing.T) {
 	t.Parallel()
-
 	s := &Server{}
+
 	items := s.topLevelCompletions()
 
 	if len(items) == 0 {
@@ -272,8 +267,8 @@ func TestTopLevelCompletions(t *testing.T) {
 
 func TestTypeBodyCompletions(t *testing.T) {
 	t.Parallel()
-
 	s := &Server{}
+
 	items := s.typeBodyCompletions()
 
 	if len(items) == 0 {
@@ -334,7 +329,6 @@ func TestTypeBodyCompletions(t *testing.T) {
 
 func TestTypeCompletions_NilSnapshot(t *testing.T) {
 	t.Parallel()
-
 	s := &Server{}
 
 	// With nil snapshot, should return empty slice without panic
@@ -351,7 +345,6 @@ func TestTypeCompletions_NilSnapshot(t *testing.T) {
 
 func TestTypeCompletions_EmptySchema(t *testing.T) {
 	t.Parallel()
-
 	s := &Server{}
 
 	// Create a snapshot with an empty schema
@@ -375,8 +368,8 @@ func TestTypeCompletions_EmptySchema(t *testing.T) {
 
 func TestPropertyTypeCompletions_BuiltinTypes(t *testing.T) {
 	t.Parallel()
-
 	s := &Server{}
+
 	// Use zero SourceID since nil snapshot means no lookup occurs
 	items := s.propertyTypeCompletions(nil, location.SourceID{})
 
@@ -407,8 +400,7 @@ func TestPropertyTypeCompletions_BuiltinTypes(t *testing.T) {
 func TestKeywordCompletion(t *testing.T) {
 	t.Parallel()
 
-	s := &Server{}
-	item := s.keywordCompletion("type", "type ${1:Name} {}", "Type declaration")
+	item := keywordCompletion("type", "type ${1:Name} {}", "Type declaration")
 
 	if item.Label != "type" {
 		t.Errorf("Label = %q; want 'type'", item.Label)
@@ -427,8 +419,7 @@ func TestKeywordCompletion(t *testing.T) {
 func TestSnippetCompletion(t *testing.T) {
 	t.Parallel()
 
-	s := &Server{}
-	item := s.snippetCompletion("property", "${1:name} String", "Property")
+	item := snippetCompletion("property", "${1:name} String", "Property")
 
 	if item.Label != "property" {
 		t.Errorf("Label = %q; want 'property'", item.Label)
@@ -470,8 +461,6 @@ func TestIsIdentifier(t *testing.T) {
 
 func TestIsInsideTypeBody(t *testing.T) {
 	t.Parallel()
-
-	s := &Server{}
 
 	tests := []struct {
 		name      string
@@ -548,7 +537,7 @@ func TestIsInsideTypeBody(t *testing.T) {
 				cursorCol = len(lines[tt.line])
 			}
 			// Test the direct brace-counting logic (without cache)
-			result := s.isInsideTypeBodyDirect(lines, tt.line, cursorCol)
+			result := isInsideTypeBodyDirect(lines, tt.line, cursorCol)
 			if result != tt.expected {
 				t.Errorf("isInsideTypeBodyDirect(line=%d, col=%d) = %v; want %v\ntext: %q",
 					tt.line, cursorCol, result, tt.expected, tt.text)
@@ -565,8 +554,6 @@ func TestIsInsideTypeBodyDirect_CommentSequencesInStrings(t *testing.T) {
 	// BEFORE string handling, causing strings like "http://" to be treated
 	// as containing a line comment.
 	t.Parallel()
-
-	s := &Server{}
 
 	tests := []struct {
 		name      string
@@ -616,7 +603,7 @@ func TestIsInsideTypeBodyDirect_CommentSequencesInStrings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			lines := strings.Split(tt.text, "\n")
-			result := s.isInsideTypeBodyDirect(lines, tt.line, tt.cursorCol)
+			result := isInsideTypeBodyDirect(lines, tt.line, tt.cursorCol)
 			if result != tt.expected {
 				t.Errorf("isInsideTypeBodyDirect(line=%d, col=%d) = %v; want %v\ntext: %q",
 					tt.line, tt.cursorCol, result, tt.expected, tt.text)
@@ -626,22 +613,21 @@ func TestIsInsideTypeBodyDirect_CommentSequencesInStrings(t *testing.T) {
 }
 
 func TestIsInsideTypeBody_CachedLineState(t *testing.T) {
-	// Tests isInsideTypeBody with a pre-computed LineState cache.
+	// Tests isInsideTypeBody with a pre-computed lineState cache.
 	// This exercises the O(1) cached path rather than the direct computation.
 	t.Parallel()
-
 	s := &Server{}
 
 	text := "type A {\n    name String\n}"
 	lines := strings.Split(text, "\n")
 
-	// Pre-compute LineState using the same logic as Workspace
-	braceDepths, inComment := ComputeBraceDepths(text)
+	// Pre-compute lineState using the same logic as Workspace
+	braceDepths, inComment := computeBraceDepths(text)
 
-	doc := &DocumentSnapshot{
+	doc := &documentSnapshot{
 		Version: 1,
 		Text:    text,
-		LineState: &LineState{
+		lineState: &lineState{
 			Version:        1, // Matches doc version
 			BraceDepth:     braceDepths,
 			InBlockComment: inComment,
@@ -674,18 +660,17 @@ func TestIsInsideTypeBody_CachedLineState(t *testing.T) {
 
 func TestIsInsideTypeBody_StaleCacheUsesDirectComputation(t *testing.T) {
 	// Tests that isInsideTypeBody falls back to direct computation when
-	// LineState version doesn't match document version.
+	// lineState version doesn't match document version.
 	t.Parallel()
-
 	s := &Server{}
 
 	text := "type A {\n    name String\n}"
 	lines := strings.Split(text, "\n")
 
-	doc := &DocumentSnapshot{
-		Version: 2, // Document version
+	doc := &documentSnapshot{
+		Version: 2, // document version
 		Text:    text,
-		LineState: &LineState{
+		lineState: &lineState{
 			Version:    1, // Stale cache version
 			BraceDepth: []int{1, 1, 0},
 		},
@@ -701,19 +686,18 @@ func TestIsInsideTypeBody_StaleCacheUsesDirectComputation(t *testing.T) {
 }
 
 func TestIsInsideTypeBody_CachedLineState_MultiLineBlockComment(t *testing.T) {
-	// Tests isInsideTypeBody with cached LineState when a multi-line block comment
+	// Tests isInsideTypeBody with cached lineState when a multi-line block comment
 	// contains braces. This exercises the O(1) cached path with InBlockComment state.
 	// Guards against false positives from braces inside block comments.
 	t.Parallel()
-
 	s := &Server{}
 
 	// Multi-line block comment with braces inside
 	text := "type A {\n/* {\n} */\n    name String\n}"
 	lines := strings.Split(text, "\n")
 
-	// Pre-compute LineState
-	braceDepths, inComment := ComputeBraceDepths(text)
+	// Pre-compute lineState
+	braceDepths, inComment := computeBraceDepths(text)
 
 	// Verify the computed state is correct
 	// Line 0: "type A {" -> depth 1, not in block comment
@@ -735,10 +719,10 @@ func TestIsInsideTypeBody_CachedLineState_MultiLineBlockComment(t *testing.T) {
 		}
 	}
 
-	doc := &DocumentSnapshot{
+	doc := &documentSnapshot{
 		Version: 1,
 		Text:    text,
-		LineState: &LineState{
+		lineState: &lineState{
 			Version:        1,
 			BraceDepth:     braceDepths,
 			InBlockComment: inComment,
@@ -776,8 +760,7 @@ func TestIsInsideTypeBody_CachedLineState_MultiLineBlockComment(t *testing.T) {
 func TestImportCompletions(t *testing.T) {
 	t.Parallel()
 
-	s := &Server{}
-	items := s.importCompletions()
+	items := importCompletions()
 
 	if len(items) == 0 {
 		t.Fatal("expected import completion")
@@ -815,13 +798,10 @@ func TestNewExprPtr(t *testing.T) {
 	}
 }
 
-// =============================================================================
 // UTF-8 Position Encoding Tests
 // These tests validate that completion works correctly with UTF-8 encoding
 // and multi-byte characters, catching regressions where byte offsets might
 // be mistakenly treated as rune offsets.
-// =============================================================================
-
 func TestDetectCompletionContext_UTF8_MultiByteChars(t *testing.T) {
 	// Validates that detectCompletionContext does not panic when character
 	// positions are byte offsets (UTF-8 encoding) and content contains
@@ -833,7 +813,6 @@ func TestDetectCompletionContext_UTF8_MultiByteChars(t *testing.T) {
 	// Note: We don't assert specific context values because that tests the context
 	// detection logic, not the UTF-8 safety. The key assertion is no panic.
 	t.Parallel()
-
 	s := &Server{}
 
 	// Content with CJK characters:
@@ -877,7 +856,7 @@ func TestDetectCompletionContext_UTF8_MultiByteChars(t *testing.T) {
 			// Primary assertion: does not panic when charByte points to middle of multi-byte char
 			result := s.detectCompletionContext(textToDoc(text), tt.line, tt.charByte)
 			// Secondary: returns a valid context
-			if result < ContextUnknown || result > ContextImportPath {
+			if result < contextUnknown || result > contextImportPath {
 				t.Errorf("detectCompletionContext returned invalid context: %d", result)
 			}
 		})
@@ -888,7 +867,6 @@ func TestDetectCompletionContext_UTF8_Emoji(t *testing.T) {
 	// Test with emoji (4-byte UTF-8 sequences) to ensure no panics
 	// when byte offsets land in the middle of multi-byte sequences.
 	t.Parallel()
-
 	s := &Server{}
 
 	// "type 😀Test {" where 😀 is 4 bytes (U+1F600)
@@ -913,7 +891,7 @@ func TestDetectCompletionContext_UTF8_Emoji(t *testing.T) {
 			// Primary assertion: does not panic
 			result := s.detectCompletionContext(textToDoc(text), 0, tt.charByte)
 			// Secondary: returns a valid context (not strictly required, but good sanity check)
-			if result < ContextUnknown || result > ContextImportPath {
+			if result < contextUnknown || result > contextImportPath {
 				t.Errorf("detectCompletionContext returned invalid context: %d", result)
 			}
 		})
@@ -956,7 +934,7 @@ type 人物 {
 
 	// Open the document and trigger analysis via textDocumentDidOpen.
 	// This ensures LatestSnapshot(uri) returns a non-nil snapshot.
-	uri := PathToURI(filePath)
+	uri := lsputil.PathToURI(filePath)
 	err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{
 			URI:        uri,
@@ -1063,7 +1041,7 @@ type Person {
 	server.workspace.SetPositionEncoding(PositionEncodingUTF8)
 
 	// Open the document and trigger analysis via textDocumentDidOpen.
-	uri := PathToURI(filePath)
+	uri := lsputil.PathToURI(filePath)
 	err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{
 			URI:        uri,
@@ -1104,10 +1082,6 @@ type Person {
 		t.Error("expected completion items for type body context")
 	}
 }
-
-// =============================================================================
-// Snippet Text Validity Tests (Priority 5: Test Coverage Gaps)
-// =============================================================================
 
 func TestTypeBodySnippets_NoCommasBeforeModifiers(t *testing.T) {
 	// Regression test for Priority 1.3 fix: snippets should NOT have commas
@@ -1222,10 +1196,7 @@ func TestImportSnippets_ValidStructure(t *testing.T) {
 	// Verify import snippet has valid placeholder structure
 	t.Parallel()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := NewServer(logger, Config{})
-
-	completions := server.importCompletions()
+	completions := importCompletions()
 
 	for _, item := range completions {
 		if item.Label == "import" && item.InsertText != nil {
@@ -1246,8 +1217,6 @@ func TestImportSnippets_ValidStructure(t *testing.T) {
 
 func TestIsImportContext_CursorAfterPath(t *testing.T) {
 	t.Parallel()
-
-	s := &Server{}
 
 	tests := []struct {
 		name         string
@@ -1357,7 +1326,7 @@ func TestIsImportContext_CursorAfterPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := s.isImportContext(tt.beforeCursor)
+			got := isImportContext(tt.beforeCursor)
 			if got != tt.want {
 				t.Errorf("isImportContext(%q) = %v; want %v", tt.beforeCursor, got, tt.want)
 			}
@@ -1402,8 +1371,6 @@ func TestIsQuotedStringComplete(t *testing.T) {
 
 func TestIsImportContext_CursorInAlias(t *testing.T) {
 	t.Parallel()
-
-	s := &Server{}
 
 	tests := []struct {
 		name         string
@@ -1450,7 +1417,7 @@ func TestIsImportContext_CursorInAlias(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := s.isImportContext(tt.beforeCursor)
+			got := isImportContext(tt.beforeCursor)
 			if got != tt.want {
 				t.Errorf("isImportContext(%q) = %v; want %v", tt.beforeCursor, got, tt.want)
 			}

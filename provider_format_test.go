@@ -11,10 +11,10 @@ import (
 
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema/load"
 
 	"github.com/simon-lentz/yammm-lsp/internal/format"
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 )
 
 func TestFormatDocument_NoChanges(t *testing.T) {
@@ -1320,7 +1320,7 @@ func TestFormatting_UsesTokenStreamFormatterForIntraLineSpacing(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := NewServer(logger, Config{ModuleRoot: tmpDir})
-	uri := PathToURI(filePath)
+	uri := lsputil.PathToURI(filePath)
 
 	if err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{
@@ -1493,114 +1493,6 @@ type Person {
 		t.Errorf("formatTokenStream: mixed indent should use brace-depth indentation:\ngot:\n%q\nwant:\n%q", tsResult, expectedCanonical)
 	}
 }
-
-// --- hasSyntaxErrors tests ---
-
-func TestHasSyntaxErrors_NoErrors(t *testing.T) {
-	t.Parallel()
-
-	// Valid schema should have no errors
-	ctx := t.Context()
-	_, result, err := load.LoadString(ctx, `schema "test"
-
-type Person {
-	name String
-}
-`, "test")
-	if err != nil {
-		t.Fatalf("unexpected load error: %v", err)
-	}
-
-	if hasSyntaxErrors(result) {
-		t.Error("hasSyntaxErrors() returned true for valid schema")
-	}
-}
-
-func TestHasSyntaxErrors_WithSyntaxError(t *testing.T) {
-	t.Parallel()
-
-	// Invalid syntax - missing closing brace
-	ctx := t.Context()
-	_, result, err := load.LoadString(ctx, `schema "test"
-
-type Person {
-	name String
-`, "test")
-	if err != nil {
-		t.Fatalf("unexpected load error: %v", err)
-	}
-
-	if !hasSyntaxErrors(result) {
-		t.Error("hasSyntaxErrors() should return true for syntax error")
-	}
-}
-
-func TestHasSyntaxErrors_WithImportOnly(t *testing.T) {
-	t.Parallel()
-
-	// Schema with import - LoadString disallows imports, but this is NOT a syntax error
-	// The parse succeeds; the import restriction is a semantic error (E_IMPORT_NOT_ALLOWED)
-	ctx := t.Context()
-	_, result, err := load.LoadString(ctx, `schema "test"
-
-import "./other" as other
-
-type Person {
-	name String
-}
-`, "test")
-	if err != nil {
-		t.Fatalf("unexpected load error: %v", err)
-	}
-
-	// Should have errors (import not allowed)
-	if result.OK() {
-		t.Fatal("expected result to have errors due to import")
-	}
-
-	// But NOT syntax errors - the file is syntactically valid
-	if hasSyntaxErrors(result) {
-		t.Error("hasSyntaxErrors() should return false for import-only errors")
-	}
-}
-
-func TestHasSyntaxErrors_VerifyImportErrorCategory(t *testing.T) {
-	t.Parallel()
-
-	// Verify that import errors are categorized as CategoryImport, not CategorySyntax
-	ctx := t.Context()
-	_, result, err := load.LoadString(ctx, `schema "test"
-import "./other" as other
-type Person { name String }
-`, "test")
-	if err != nil {
-		t.Fatalf("unexpected load error: %v", err)
-	}
-
-	// Check that we have errors
-	if result.OK() {
-		t.Fatal("expected errors due to import in LoadString")
-	}
-
-	// Verify the error category
-	foundImportError := false
-	for issue := range result.Errors() {
-		if issue.Code().Category() == diag.CategoryImport {
-			foundImportError = true
-		}
-		if issue.Code().Category() == diag.CategorySyntax {
-			t.Errorf("import error should not be CategorySyntax, got code: %s", issue.Code())
-		}
-	}
-
-	if !foundImportError {
-		t.Error("expected to find an import error (CategoryImport)")
-	}
-}
-
-// =============================================================================
-// Multibyte Content Tests (Priority 5: Test Coverage Gaps)
-// =============================================================================
 
 func TestFormatDocument_MultibyteCJK(t *testing.T) {
 	// Test formatting with CJK characters (Chinese/Japanese/Korean) in strings
@@ -1826,7 +1718,7 @@ func TestFormatting_UTF8PositionEncoding(t *testing.T) {
 			server.workspace.SetPositionEncoding(tt.encoding)
 
 			// Open the document
-			uri := PathToURI(filePath)
+			uri := lsputil.PathToURI(filePath)
 			err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
 				TextDocument: protocol.TextDocumentItem{
 					URI:        uri,
@@ -1848,7 +1740,7 @@ func TestFormatting_UTF8PositionEncoding(t *testing.T) {
 			}
 
 			if len(edits) == 0 {
-				// Document doesn't need formatting (trailing spaces removed in formatDocument)
+				// document doesn't need formatting (trailing spaces removed in formatDocument)
 				// This is acceptable - the test just verifies no crash with encoding switch
 				return
 			}
@@ -1867,10 +1759,6 @@ func TestFormatting_UTF8PositionEncoding(t *testing.T) {
 		})
 	}
 }
-
-// =============================================================================
-// Column Alignment (Phase 3) Unit Tests
-// =============================================================================
 
 func TestAlignColumns_PropertyNamePadding(t *testing.T) {
 	t.Parallel()
@@ -2039,10 +1927,6 @@ func TestAlignColumns_EmptyAndPassthrough(t *testing.T) {
 		t.Errorf("non-alignable input should pass through unchanged:\ngot:\n%q\nwant:\n%q", result, nonAlignable)
 	}
 }
-
-// =============================================================================
-// Phase 4: Long Line Wrapping Tests
-// =============================================================================
 
 // --- displayWidth ---
 

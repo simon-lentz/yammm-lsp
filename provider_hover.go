@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
@@ -19,6 +21,7 @@ import (
 //
 //nolint:nilnil // LSP protocol: nil result means "no hover info"
 func (s *Server) textDocumentHover(_ context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+	defer s.logTiming("textDocument/hover", time.Now())
 	uri := params.TextDocument.URI
 
 	s.logger.Debug("hover request",
@@ -48,7 +51,7 @@ func (s *Server) textDocumentHover(_ context.Context, params *protocol.HoverPara
 // markdownHover handles hover requests within yammm code blocks in markdown files.
 //
 //nolint:nilnil // LSP protocol: nil result means "no hover info"
-func (s *Server) markdownHover(params *protocol.HoverParams, mdSnap *MarkdownDocumentSnapshot) (*protocol.Hover, error) {
+func (s *Server) markdownHover(params *protocol.HoverParams, mdSnap *markdownDocumentSnapshot) (*protocol.Hover, error) {
 	blockPos := mdSnap.MarkdownPositionToBlock(int(params.Position.Line), int(params.Position.Character))
 	if blockPos == nil {
 		return nil, nil
@@ -87,7 +90,7 @@ func (s *Server) markdownHover(params *protocol.HoverParams, mdSnap *MarkdownDoc
 // Returns nil, nil when no hover info is found.
 //
 //nolint:nilnil // LSP protocol: nil result means "no hover info"
-func (s *Server) hoverAtPosition(snapshot *analysis.Snapshot, doc *DocumentSnapshot, line, char int) (*protocol.Hover, error) {
+func (s *Server) hoverAtPosition(snapshot *analysis.Snapshot, doc *documentSnapshot, line, char int) (*protocol.Hover, error) {
 	if snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for hover",
 			"uri", doc.URI,
@@ -101,7 +104,7 @@ func (s *Server) hoverAtPosition(snapshot *analysis.Snapshot, doc *DocumentSnaps
 		return nil, nil
 	}
 
-	internalPos, ok := PositionFromLSP(
+	internalPos, ok := lsputil.PositionFromLSP(
 		snapshot.Sources,
 		doc.SourceID,
 		line,
@@ -142,19 +145,19 @@ func (s *Server) buildHoverForSymbolWithRange(sym *symbols.Symbol, snapshot *ana
 
 	switch sym.Kind {
 	case symbols.SymbolSchema:
-		content = s.hoverForSchema(sym)
+		content = hoverForSchema(sym)
 	case symbols.SymbolImport:
-		content = s.hoverForImport(sym)
+		content = hoverForImport(sym)
 	case symbols.SymbolType:
 		content = s.hoverForType(sym, snapshot)
 	case symbols.SymbolDataType:
-		content = s.hoverForDataType(sym)
+		content = hoverForDataType(sym)
 	case symbols.SymbolProperty:
-		content = s.hoverForProperty(sym)
+		content = hoverForProperty(sym)
 	case symbols.SymbolAssociation, symbols.SymbolComposition:
-		content = s.hoverForRelation(sym)
+		content = hoverForRelation(sym)
 	case symbols.SymbolInvariant:
-		content = s.hoverForInvariant(sym)
+		content = hoverForInvariant(sym)
 	default:
 		return nil, nil
 	}
@@ -177,7 +180,7 @@ func (s *Server) buildHoverForSymbolWithRange(sym *symbols.Symbol, snapshot *ana
 	}
 
 	// Use proper UTF-16 conversion for the hover range
-	start, end, ok := SpanToLSPRange(snapshot.Sources, rangeSpan, s.workspace.PositionEncoding())
+	start, end, ok := lsputil.SpanToLSPRange(snapshot.Sources, rangeSpan, s.workspace.PositionEncoding())
 	if !ok {
 		// Fallback to naive conversion if span conversion fails
 		return &protocol.Hover{
@@ -211,7 +214,7 @@ func (s *Server) buildHoverForSymbolWithRange(sym *symbols.Symbol, snapshot *ana
 }
 
 // hoverForSchema generates hover content for a schema symbol.
-func (s *Server) hoverForSchema(sym *symbols.Symbol) string {
+func hoverForSchema(sym *symbols.Symbol) string {
 	var b strings.Builder
 	b.WriteString("**schema** `")
 	b.WriteString(sym.Name)
@@ -220,7 +223,7 @@ func (s *Server) hoverForSchema(sym *symbols.Symbol) string {
 }
 
 // hoverForImport generates hover content for an import symbol.
-func (s *Server) hoverForImport(sym *symbols.Symbol) string {
+func hoverForImport(sym *symbols.Symbol) string {
 	imp, ok := sym.Data.(*schema.Import)
 	if !ok {
 		return ""
@@ -322,7 +325,7 @@ func (s *Server) hoverForType(sym *symbols.Symbol, snapshot *analysis.Snapshot) 
 }
 
 // hoverForDataType generates hover content for a datatype symbol.
-func (s *Server) hoverForDataType(sym *symbols.Symbol) string {
+func hoverForDataType(sym *symbols.Symbol) string {
 	dt, ok := sym.Data.(*schema.DataType)
 	if !ok {
 		return ""
@@ -345,7 +348,7 @@ func (s *Server) hoverForDataType(sym *symbols.Symbol) string {
 }
 
 // hoverForProperty generates hover content for a property symbol.
-func (s *Server) hoverForProperty(sym *symbols.Symbol) string {
+func hoverForProperty(sym *symbols.Symbol) string {
 	p, ok := sym.Data.(*schema.Property)
 	if !ok {
 		return ""
@@ -395,7 +398,7 @@ func (s *Server) hoverForProperty(sym *symbols.Symbol) string {
 }
 
 // hoverForRelation generates hover content for a relation symbol.
-func (s *Server) hoverForRelation(sym *symbols.Symbol) string {
+func hoverForRelation(sym *symbols.Symbol) string {
 	r, ok := sym.Data.(*schema.Relation)
 	if !ok {
 		return ""
@@ -492,7 +495,7 @@ func (s *Server) hoverForRelation(sym *symbols.Symbol) string {
 }
 
 // hoverForInvariant generates hover content for an invariant symbol.
-func (s *Server) hoverForInvariant(sym *symbols.Symbol) string {
+func hoverForInvariant(sym *symbols.Symbol) string {
 	inv, ok := sym.Data.(*schema.Invariant)
 	if !ok {
 		return ""

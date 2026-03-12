@@ -42,23 +42,23 @@ type debounceEntry struct {
 	cancel context.CancelFunc
 }
 
-// Notifier is a function that sends LSP notifications.
+// notifyFunc is a function that sends LSP notifications.
 // This type decouples notification sending from transport details.
 // This reduces coupling in closures
 // (e.g., debounce timers) and makes explicit what capability is being captured.
-type Notifier func(method string, params any)
+type notifyFunc func(method string, params any)
 
-// Document represents an open text document.
-// LineState holds cached per-line analysis results for completion context detection.
+// document represents an open text document.
+// lineState holds cached per-line analysis results for completion context detection.
 // This enables O(1) lookup for isInsideTypeBody instead of O(n) scanning from line 0.
-type LineState struct {
-	Version        int    // Document version this state was computed for
+type lineState struct {
+	Version        int    // document version this state was computed for
 	BraceDepth     []int  // BraceDepth[i] = nesting depth at END of line i
 	InBlockComment []bool // InBlockComment[i] = true if line i ends inside a block comment
 }
 
-// Document represents an open document in the workspace.
-type Document struct {
+// document represents an open document in the workspace.
+type document struct {
 	URI       string
 	SourceID  location.SourceID
 	Version   int
@@ -67,28 +67,28 @@ type Document struct {
 
 	// lineState caches per-line brace depth for completion context.
 	// Lazily computed and invalidated when Version changes.
-	lineState *LineState
+	lineState *lineState
 }
 
-// DocumentSnapshot is an immutable view of a document at a point in time.
+// documentSnapshot is an immutable view of a document at a point in time.
 // Use this when you need to access document state outside of locks to avoid
 // data races with concurrent DocumentChanged calls.
-type DocumentSnapshot struct {
+type documentSnapshot struct {
 	URI       string
 	SourceID  location.SourceID
 	Version   int
 	Text      string
-	LineState *LineState // Cached brace depth per line (may be nil)
+	lineState *lineState // Cached brace depth per line (may be nil)
 }
 
-// ComputeBraceDepths computes the brace nesting depth and block comment state
+// computeBraceDepths computes the brace nesting depth and block comment state
 // at the end of each line. This is used for completion context detection (isInsideTypeBody).
 // The function properly skips braces inside comments and string literals.
 //
 // Returns two parallel slices:
 //   - depths[i] = brace nesting depth at end of line i
 //   - inComment[i] = true if line i ends inside a block comment
-func ComputeBraceDepths(text string) (depths []int, inComment []bool) {
+func computeBraceDepths(text string) (depths []int, inComment []bool) {
 	// Normalize line endings to LF for consistent processing.
 	// Windows clients may send CRLF (\r\n), which would leave trailing \r
 	// in each line after splitting on \n.
@@ -97,73 +97,25 @@ func ComputeBraceDepths(text string) (depths []int, inComment []bool) {
 	lines := strings.Split(text, "\n")
 	depths = make([]int, len(lines))
 	inComment = make([]bool, len(lines))
-	braceDepth := 0
-	inBlockComment := false
 
+	var bs braceScanner
 	for i, line := range lines {
-		j := 0
-		for j < len(line) {
-			// Handle block comment continuation
-			if inBlockComment {
-				if j+1 < len(line) && line[j] == '*' && line[j+1] == '/' {
-					j += 2
-					inBlockComment = false
-					continue
-				}
-				j++
-				continue
-			}
-
-			ch := line[j]
-
-			// Skip line comments (rest of line)
-			if j+1 < len(line) && line[j] == '/' && line[j+1] == '/' {
-				break
-			}
-
-			// Start block comment
-			if j+1 < len(line) && line[j] == '/' && line[j+1] == '*' {
-				inBlockComment = true
-				j += 2
-				continue
-			}
-
-			// Skip string literals
-			if ch == '"' || ch == '\'' {
-				quote := ch
-				j++
-				for j < len(line) {
-					if line[j] == '\\' && j+1 < len(line) {
-						j += 2 // skip escape sequence
-						continue
-					}
-					if line[j] == quote {
-						j++
-						break
-					}
-					j++
-				}
-				continue
-			}
-
-			// Count braces
-			switch ch {
-			case '{':
-				braceDepth++
-			case '}':
-				braceDepth--
-			}
-			j++
-		}
-		depths[i] = braceDepth
-		inComment[i] = inBlockComment
+		bs.scanLine(line, len(line))
+		depths[i] = bs.depth
+		inComment[i] = bs.inBlockComment
 	}
 
 	return depths, inComment
 }
 
 // Workspace manages the state of open documents and analysis results.
+//
+// Lock ordering: debounceMu must never be acquired while holding mu.
+// Methods that need both must release mu before acquiring debounceMu.
+// Methods with a "Locked" suffix expect the caller to already hold mu.
 type Workspace struct {
+	// mu protects: open, markdownDocs, openCounter, canonicalToURI, snapshots,
+	// posEncoding, importsByEntry, reverseDeps, publishedByEntry, roots.
 	mu sync.RWMutex
 
 	logger *slog.Logger
@@ -173,10 +125,10 @@ type Workspace struct {
 	roots []string
 
 	// Open documents keyed by URI
-	open map[string]*Document
+	open map[string]*document
 
 	// Open markdown documents keyed by URI
-	markdownDocs map[string]*MarkdownDocument
+	markdownDocs map[string]*markdownDocument
 
 	// Counter for deterministic document ordering (symlink disambiguation)
 	openCounter int
@@ -205,16 +157,24 @@ type Workspace struct {
 	// Reverse dependencies: imported URI -> set of entry URIs that import it
 	reverseDeps map[string]map[string]struct{}
 
+	// debounceMu protects: debounces.
+	// Must not be acquired while holding mu (see lock ordering above).
+	debounceMu sync.Mutex
+
 	// Debounce entries for analysis, keyed by URI.
 	// Each entry tracks a pending analysis timer and its cancellation function.
 	// Using a single map of entry pointers enables safe cleanup via pointer identity.
-	debounces  map[string]*debounceEntry
-	debounceMu sync.Mutex
+	debounces map[string]*debounceEntry
 
 	// Previously published diagnostics URIs, keyed by entry URI.
 	// This per-entry tracking ensures that analyzing one entry doesn't
 	// clear diagnostics published by a different entry file.
 	publishedByEntry map[string]map[string]struct{}
+
+	// bgCtx is the workspace-lifetime context for analysis goroutines.
+	// Cancelled during Shutdown to abort in-flight analysis.
+	bgCtx    context.Context //nolint:containedctx // workspace-lifetime context, not request-scoped
+	bgCancel context.CancelFunc
 
 	// Analyzer for schema loading
 	analyzer *analysis.Analyzer
@@ -238,12 +198,16 @@ func NewWorkspace(logger *slog.Logger, cfg Config) *Workspace {
 		}
 	}
 
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+
 	return &Workspace{
 		logger:           logger.With(slog.String("component", "workspace")),
 		config:           cfg,
+		bgCtx:            bgCtx,
+		bgCancel:         bgCancel,
 		roots:            make([]string, 0),
-		open:             make(map[string]*Document),
-		markdownDocs:     make(map[string]*MarkdownDocument),
+		open:             make(map[string]*document),
+		markdownDocs:     make(map[string]*markdownDocument),
 		snapshots:        make(map[string]*analysis.Snapshot),
 		posEncoding:      PositionEncodingUTF16,
 		importsByEntry:   make(map[string]map[string]struct{}),
@@ -254,12 +218,18 @@ func NewWorkspace(logger *slog.Logger, cfg Config) *Workspace {
 	}
 }
 
+// BackgroundContext returns the workspace's background context for analysis.
+// This context is cancelled during Shutdown.
+func (w *Workspace) BackgroundContext() context.Context {
+	return w.bgCtx
+}
+
 // AddRoot adds a workspace root.
 func (w *Workspace) AddRoot(uri string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	path, err := URIToPath(uri)
+	path, err := lsputil.URIToPath(uri)
 	if err != nil {
 		w.logger.Warn("failed to parse workspace root URI",
 			slog.String("uri", uri),
@@ -291,7 +261,7 @@ func (w *Workspace) RemoveRoot(uri string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	path, err := URIToPath(uri)
+	path, err := lsputil.URIToPath(uri)
 	if err != nil {
 		w.logger.Warn("failed to parse workspace root URI for removal",
 			slog.String("uri", uri),
@@ -344,7 +314,7 @@ func (w *Workspace) DocumentOpened(uri string, version int, text string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	path, err := URIToPath(uri)
+	path, err := lsputil.URIToPath(uri)
 	if err != nil {
 		w.logger.Warn("failed to parse document URI",
 			slog.String("uri", uri),
@@ -377,13 +347,23 @@ func (w *Workspace) DocumentOpened(uri string, version int, text string) {
 	// line-based operations if not normalized here at the storage layer.
 	text = normalizeLineEndings(text)
 
+	// Eagerly compute lineState on the write path to avoid lock juggling in
+	// GetDocumentSnapshot. For typical yammm files (<1000 lines) this is
+	// sub-millisecond and dominated by the 150ms debounce delay.
+	depths, inComment := computeBraceDepths(text)
+
 	w.openCounter++
-	w.open[uri] = &Document{
+	w.open[uri] = &document{
 		URI:       uri,
 		SourceID:  sourceID,
 		Version:   version,
 		Text:      text,
 		OpenOrder: w.openCounter,
+		lineState: &lineState{
+			Version:        version,
+			BraceDepth:     depths,
+			InBlockComment: inComment,
+		},
 	}
 
 	// Invalidate canonical-to-URI cache (new document may map to a canonical path)
@@ -410,17 +390,22 @@ func (w *Workspace) DocumentChanged(uri string, version int, text string) {
 		doc.Version = version
 		// Normalize line endings (CRLF/CR → LF) for consistent offset calculations.
 		doc.Text = normalizeLineEndings(text)
-		// Invalidate cached LineState - content changed, cache must be recomputed.
-		// This is essential when version==0 (unknown), since version-based invalidation
-		// would incorrectly consider the cache valid despite text changes.
-		doc.lineState = nil
+		// Eagerly recompute lineState on every change. For typical yammm files
+		// (<1000 lines) this is sub-millisecond and eliminates lock juggling
+		// in GetDocumentSnapshot.
+		depths, inComment := computeBraceDepths(doc.Text)
+		doc.lineState = &lineState{
+			Version:        doc.Version,
+			BraceDepth:     depths,
+			InBlockComment: inComment,
+		}
 	}
 }
 
 // DocumentClosed handles a document being closed.
 // notify is the notification function for clearing diagnostics; if nil,
 // diagnostics are not cleared (useful in tests).
-func (w *Workspace) DocumentClosed(notify Notifier, uri string) {
+func (w *Workspace) DocumentClosed(notify notifyFunc, uri string) {
 	w.mu.Lock()
 	delete(w.open, uri)
 	delete(w.snapshots, uri)
@@ -450,7 +435,7 @@ func (w *Workspace) DocumentClosed(notify Notifier, uri string) {
 
 	// Clear diagnostics for URIs only published by this entry
 	for _, pubURI := range urisToClear {
-		w.publishDiagnostics(notify, pubURI, nil)
+		w.publishDiagnostics(notify, pubURI, nil, nil)
 	}
 
 	// Cancel any pending analysis
@@ -463,7 +448,7 @@ func (w *Workspace) DocumentClosed(notify Notifier, uri string) {
 // ReanalyzeOpenDocuments triggers re-analysis of all open documents.
 // This is called when workspace folders change, as module root selection
 // may have changed for existing documents.
-func (w *Workspace) ReanalyzeOpenDocuments(notify Notifier) {
+func (w *Workspace) ReanalyzeOpenDocuments(notify notifyFunc) {
 	w.mu.RLock()
 	uris := make([]string, 0, len(w.open))
 	for uri := range w.open {
@@ -477,7 +462,7 @@ func (w *Workspace) ReanalyzeOpenDocuments(notify Notifier) {
 }
 
 // ScheduleAnalysis schedules a debounced analysis for the given document.
-func (w *Workspace) ScheduleAnalysis(notify Notifier, uri string) {
+func (w *Workspace) ScheduleAnalysis(notify notifyFunc, uri string) {
 	w.debounceMu.Lock()
 	defer w.debounceMu.Unlock()
 
@@ -487,8 +472,9 @@ func (w *Workspace) ScheduleAnalysis(notify Notifier, uri string) {
 		existing.cancel()
 	}
 
-	// Create new cancellation context
-	analyzeCtx, cancel := context.WithCancel(context.Background())
+	// Create new cancellation context derived from workspace background context.
+	// This ensures in-flight analysis is cancelled when the workspace shuts down.
+	analyzeCtx, cancel := context.WithCancel(w.bgCtx)
 
 	// Create entry before timer so we can capture its pointer for identity check.
 	// This pointer identity is used in the callback to ensure we only clean up
@@ -521,7 +507,7 @@ func (w *Workspace) ScheduleAnalysis(notify Notifier, uri string) {
 // analyzeCtx is a cancellable context; if cancelled, analysis aborts early.
 // notify is the notification function for publishing diagnostics; if nil,
 // diagnostics are computed but not published (useful in tests).
-func (w *Workspace) AnalyzeAndPublish(notify Notifier, analyzeCtx context.Context, uri string) {
+func (w *Workspace) AnalyzeAndPublish(notify notifyFunc, analyzeCtx context.Context, uri string) {
 	w.mu.RLock()
 	doc, ok := w.open[uri]
 	if !ok {
@@ -542,7 +528,7 @@ func (w *Workspace) AnalyzeAndPublish(notify Notifier, analyzeCtx context.Contex
 	w.mu.RUnlock()
 
 	// Find module root for this document (after releasing lock to avoid deadlock)
-	path, err := URIToPath(uri)
+	path, err := lsputil.URIToPath(uri)
 	if err != nil {
 		w.logger.Warn("failed to parse document URI for analysis",
 			slog.String("uri", uri),
@@ -629,19 +615,20 @@ func (w *Workspace) AnalyzeAndPublish(notify Notifier, analyzeCtx context.Contex
 //
 // entryURI identifies the entry file being analyzed, used for per-entry
 // diagnostic tracking to avoid cross-entry interference in multi-file sessions.
-func (w *Workspace) publishSnapshotDiagnostics(notify Notifier, entryURI string, snapshot *analysis.Snapshot) {
+func (w *Workspace) publishSnapshotDiagnostics(notify notifyFunc, entryURI string, snapshot *analysis.Snapshot) {
 	if notify == nil {
 		return // No-op in test context without transport
 	}
 
 	// Phase 1: Compute publication plan under lock
-	diagsByURI, staleURIs := w.computePublicationPlan(entryURI, snapshot)
+	diagsByURI, staleURIs, versionsByURI := w.computePublicationPlan(entryURI, snapshot)
 
 	// Phase 2: Emit notifications outside the lock
 	// Clear stale diagnostics
 	for _, uri := range staleURIs {
 		notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 			URI:         uri,
+			Version:     versionsByURI[uri],
 			Diagnostics: []protocol.Diagnostic{},
 		})
 	}
@@ -650,6 +637,7 @@ func (w *Workspace) publishSnapshotDiagnostics(notify Notifier, entryURI string,
 	for uri, diags := range diagsByURI {
 		notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 			URI:         uri,
+			Version:     versionsByURI[uri],
 			Diagnostics: diags,
 		})
 	}
@@ -663,7 +651,7 @@ func (w *Workspace) publishSnapshotDiagnostics(notify Notifier, entryURI string,
 // that analyzing one entry doesn't clear diagnostics from another entry.
 //
 // This method acquires the workspace lock internally.
-func (w *Workspace) computePublicationPlan(entryURI string, snapshot *analysis.Snapshot) (diagsByURI map[string][]protocol.Diagnostic, staleURIs []string) {
+func (w *Workspace) computePublicationPlan(entryURI string, snapshot *analysis.Snapshot) (diagsByURI map[string][]protocol.Diagnostic, staleURIs []string, versionsByURI map[string]*protocol.Integer) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -672,7 +660,7 @@ func (w *Workspace) computePublicationPlan(entryURI string, snapshot *analysis.S
 	// We need to map them back to the URIs the client used to open documents.
 	// Reuse cached map if available (invalidated by DocumentOpened/DocumentClosed).
 	if w.canonicalToURI == nil {
-		w.canonicalToURI = w.buildCanonicalToURIMap()
+		w.canonicalToURI = w.buildCanonicalToURIMapLocked()
 	}
 	canonicalToDocURI := w.canonicalToURI
 
@@ -684,7 +672,7 @@ func (w *Workspace) computePublicationPlan(entryURI string, snapshot *analysis.S
 
 	for _, lspDiag := range snapshot.LSPDiagnostics {
 		// Remap the diagnostic URI to the open document URI if available
-		pubURI := w.remapToOpenDocURI(lspDiag.URI, canonicalToDocURI)
+		pubURI := w.remapToOpenDocURILocked(lspDiag.URI, canonicalToDocURI)
 
 		// Also remap URIs in RelatedInformation
 		diag := lspDiag.Diagnostic
@@ -693,7 +681,7 @@ func (w *Workspace) computePublicationPlan(entryURI string, snapshot *analysis.S
 			for i, rel := range diag.RelatedInformation {
 				remapped[i] = protocol.DiagnosticRelatedInformation{
 					Location: protocol.Location{
-						URI:   w.remapToOpenDocURI(rel.Location.URI, canonicalToDocURI),
+						URI:   w.remapToOpenDocURILocked(rel.Location.URI, canonicalToDocURI),
 						Range: rel.Location.Range,
 					},
 					Message: rel.Message,
@@ -719,7 +707,23 @@ func (w *Workspace) computePublicationPlan(entryURI string, snapshot *analysis.S
 	// Update published URIs tracking for this entry only
 	w.publishedByEntry[entryURI] = currentURIs
 
-	return diagsByURI, staleURIs
+	// Capture document versions while lock is held.
+	// LSP document versions fit in int32 per spec.
+	versionsByURI = make(map[string]*protocol.Integer)
+	for uri := range diagsByURI {
+		if doc, ok := w.open[uri]; ok {
+			v := protocol.Integer(doc.Version) //nolint:gosec // LSP version fits int32
+			versionsByURI[uri] = &v
+		}
+	}
+	for _, uri := range staleURIs {
+		if doc, ok := w.open[uri]; ok {
+			v := protocol.Integer(doc.Version) //nolint:gosec // LSP version fits int32
+			versionsByURI[uri] = &v
+		}
+	}
+
+	return diagsByURI, staleURIs, versionsByURI
 }
 
 // publishDiagnostics publishes diagnostics for a URI.
@@ -727,7 +731,8 @@ func (w *Workspace) computePublicationPlan(entryURI string, snapshot *analysis.S
 // and does not access any workspace state. Calling notify under lock risks
 // deadlock if the notification blocks on I/O.
 // If notify is nil (e.g., in tests without a transport), this is a no-op.
-func (w *Workspace) publishDiagnostics(notify Notifier, uri string, diagnostics []protocol.Diagnostic) {
+// version may be nil (e.g., when clearing diagnostics on document close).
+func (w *Workspace) publishDiagnostics(notify notifyFunc, uri string, version *protocol.Integer, diagnostics []protocol.Diagnostic) {
 	if notify == nil {
 		return // No-op in test context without transport
 	}
@@ -738,6 +743,7 @@ func (w *Workspace) publishDiagnostics(notify Notifier, uri string, diagnostics 
 
 	notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 		URI:         uri,
+		Version:     version,
 		Diagnostics: diagnostics,
 	})
 }
@@ -747,12 +753,12 @@ func (w *Workspace) publishDiagnostics(notify Notifier, uri string, diagnostics 
 //
 // The incoming URI is canonicalized before lookup to handle symlink and path
 // variations between what VS Code reports and what we store internally.
-func (w *Workspace) FileChanged(notify Notifier, uri string, changeType protocol.UInteger) {
+func (w *Workspace) FileChanged(notify notifyFunc, uri string, changeType protocol.UInteger) {
 	// Canonicalize URI to match how we store reverseDeps keys.
 	// VS Code may report symlinked or case-different paths.
 	// Resolve symlinks to match the loader's canonicalization (makeCanonicalPath).
 	canonicalURI := uri
-	if path, err := URIToPath(uri); err == nil {
+	if path, err := lsputil.URIToPath(uri); err == nil {
 		if resolved, err := filepath.EvalSymlinks(path); err == nil {
 			path = filepath.Clean(resolved)
 		} else {
@@ -762,7 +768,7 @@ func (w *Workspace) FileChanged(notify Notifier, uri string, changeType protocol
 			path = filepath.Clean(path)
 		}
 		if sourceID, err := location.SourceIDFromAbsolutePath(path); err == nil {
-			canonicalURI = PathToURI(sourceID.String())
+			canonicalURI = lsputil.PathToURI(sourceID.String())
 		}
 	}
 
@@ -789,7 +795,7 @@ func (w *Workspace) UpdateDependencies(entryURI string, importedPaths []string) 
 	// Convert imported paths to URIs
 	importedURIs := make(map[string]struct{}, len(importedPaths))
 	for _, path := range importedPaths {
-		importedURIs[PathToURI(path)] = struct{}{}
+		importedURIs[lsputil.PathToURI(path)] = struct{}{}
 	}
 
 	// Step 1: Remove old edges from reverse deps
@@ -841,6 +847,10 @@ func (w *Workspace) cancelPendingAnalysis(uri string) {
 // Shutdown cancels all pending analysis operations.
 // This should be called during server shutdown to ensure clean termination.
 func (w *Workspace) Shutdown() {
+	// Cancel the background context first to abort any in-flight analysis
+	// goroutines that may be running outside the debounce map.
+	w.bgCancel()
+
 	w.debounceMu.Lock()
 	defer w.debounceMu.Unlock()
 
@@ -898,54 +908,23 @@ func (w *Workspace) LatestSnapshot(uri string) *analysis.Snapshot {
 // GetDocumentSnapshot returns an immutable snapshot of the document for a URI.
 // The snapshot contains a copy of the document state at the time of the call,
 // allowing safe access outside of locks without racing with DocumentChanged.
-func (w *Workspace) GetDocumentSnapshot(uri string) *DocumentSnapshot {
+func (w *Workspace) GetDocumentSnapshot(uri string) *documentSnapshot {
 	w.mu.RLock()
+	defer w.mu.RUnlock()
+
 	doc := w.open[uri]
 	if doc == nil {
-		w.mu.RUnlock()
 		return nil
 	}
 
-	// Check if we need to compute LineState (lazy computation)
-	if doc.lineState == nil || doc.lineState.Version != doc.Version {
-		// Upgrade to write lock to compute and cache LineState
-		w.mu.RUnlock()
-		w.mu.Lock()
-		// Double-check after acquiring write lock (another goroutine may have computed it)
-		doc = w.open[uri]
-		if doc != nil && (doc.lineState == nil || doc.lineState.Version != doc.Version) {
-			depths, inComment := ComputeBraceDepths(doc.Text)
-			doc.lineState = &LineState{
-				Version:        doc.Version,
-				BraceDepth:     depths,
-				InBlockComment: inComment,
-			}
-		}
-		w.mu.Unlock()
-		w.mu.RLock()
-		doc = w.open[uri]
-		if doc == nil {
-			w.mu.RUnlock()
-			return nil
-		}
-	}
-
-	snapshot := &DocumentSnapshot{
+	return &documentSnapshot{
 		URI:       doc.URI,
 		SourceID:  doc.SourceID,
 		Version:   doc.Version,
 		Text:      doc.Text,
-		LineState: doc.lineState,
+		lineState: doc.lineState,
 	}
-	w.mu.RUnlock()
-	return snapshot
 }
-
-// URIToPath delegates to lsputil.URIToPath.
-var URIToPath = lsputil.URIToPath
-
-// PathToURI delegates to lsputil.PathToURI.
-var PathToURI = lsputil.PathToURI
 
 // RemapPathToURI maps a path to the client's document URI if the file is open.
 // This ensures definitions point to the same URI the client used to open the
@@ -966,7 +945,7 @@ var PathToURI = lsputil.PathToURI
 func (w *Workspace) RemapPathToURI(input string) string {
 	// Normalize input to canonical path
 	var rawPath string
-	if path, err := URIToPath(input); err == nil {
+	if path, err := lsputil.URIToPath(input); err == nil {
 		// Valid file:// URI - use extracted path
 		rawPath = path
 	} else if lsputil.HasURIScheme(input) {
@@ -987,7 +966,7 @@ func (w *Workspace) RemapPathToURI(input string) string {
 
 	// Rebuild cache if invalidated
 	if w.canonicalToURI == nil {
-		w.canonicalToURI = w.buildCanonicalToURIMap()
+		w.canonicalToURI = w.buildCanonicalToURIMapLocked()
 	}
 
 	// Fast path: try direct lookup first. This succeeds when input is already
@@ -1007,12 +986,12 @@ func (w *Workspace) RemapPathToURI(input string) string {
 			}
 		}
 		// File not open - return file:// URI for the canonical path
-		return PathToURI(canonicalPath)
+		return lsputil.PathToURI(canonicalPath)
 	}
 
 	// EvalSymlinks failed (nonexistent file, broken symlink, etc.)
 	// Return file:// URI for the cleaned path
-	return PathToURI(cleanedPath)
+	return lsputil.PathToURI(cleanedPath)
 }
 
 // buildCanonicalToURIMap builds a mapping from canonical (symlink-resolved)
@@ -1023,13 +1002,13 @@ func (w *Workspace) RemapPathToURI(input string) string {
 // URI they used to open them, which may be a symlink path. This mapping allows
 // us to translate diagnostic URIs back to client-expected URIs.
 //
-// This method prefers Document.SourceID (set at open time via SourceIDFromAbsolutePath)
+// This method prefers document.SourceID (set at open time via SourceIDFromAbsolutePath)
 // over runtime EvalSymlinks, since SourceID is the canonical identity used by the
 // loader and is already computed. This also works for new files that don't yet
 // exist on disk, where EvalSymlinks would fail.
 //
 // Must be called with w.mu held.
-func (w *Workspace) buildCanonicalToURIMap() map[string]string {
+func (w *Workspace) buildCanonicalToURIMapLocked() map[string]string {
 	canonicalToURI := make(map[string]string, len(w.open))
 	openOrderByCanonical := make(map[string]int, len(w.open))
 
@@ -1041,7 +1020,7 @@ func (w *Workspace) buildCanonicalToURIMap() map[string]string {
 			canonical = doc.SourceID.String()
 		} else {
 			// Fallback for non-file URIs or when SourceID unavailable
-			path, err := URIToPath(uri)
+			path, err := lsputil.URIToPath(uri)
 			if err != nil {
 				continue
 			}
@@ -1081,8 +1060,10 @@ func (w *Workspace) buildCanonicalToURIMap() map[string]string {
 // This function tolerates both file:// URIs and raw filesystem paths as input,
 // since RelatedInformation may come from various sources. It always returns
 // a valid URI to maintain LSP protocol correctness.
-func (w *Workspace) remapToOpenDocURI(diagURI string, canonicalToDocURI map[string]string) string {
-	path, err := URIToPath(diagURI)
+//
+// Must be called with w.mu held.
+func (w *Workspace) remapToOpenDocURILocked(diagURI string, canonicalToDocURI map[string]string) string {
+	path, err := lsputil.URIToPath(diagURI)
 	if err != nil {
 		// Not a valid file:// URI.
 		// Check if it's a non-file URI scheme - preserve as-is.
@@ -1107,18 +1088,18 @@ func (w *Workspace) remapToOpenDocURI(diagURI string, canonicalToDocURI map[stri
 	// If input was a raw path, convert to proper file:// URI for protocol correctness.
 	// If input was already a file:// URI, return unchanged.
 	if err != nil {
-		return PathToURI(path)
+		return lsputil.PathToURI(path)
 	}
 	return diagURI
 }
 
-// MarkdownDocumentOpened creates a MarkdownDocument with normalized text and version.
+// MarkdownDocumentOpened creates a markdownDocument with normalized text and version.
 // Block extraction is deferred to AnalyzeMarkdownAndPublish.
 func (w *Workspace) MarkdownDocumentOpened(uri string, version int, text string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	w.markdownDocs[uri] = &MarkdownDocument{
+	w.markdownDocs[uri] = &markdownDocument{
 		URI:     uri,
 		Version: version,
 		Text:    normalizeLineEndings(text),
@@ -1150,7 +1131,7 @@ func (w *Workspace) MarkdownDocumentChanged(uri string, version int, text string
 }
 
 // MarkdownDocumentClosed removes a markdown document and clears its diagnostics.
-func (w *Workspace) MarkdownDocumentClosed(notify Notifier, uri string) {
+func (w *Workspace) MarkdownDocumentClosed(notify notifyFunc, uri string) {
 	w.mu.Lock()
 	delete(w.markdownDocs, uri)
 
@@ -1159,14 +1140,14 @@ func (w *Workspace) MarkdownDocumentClosed(notify Notifier, uri string) {
 	w.mu.Unlock()
 
 	if hadPublished {
-		w.publishDiagnostics(notify, uri, nil)
+		w.publishDiagnostics(notify, uri, nil, nil)
 	}
 
 	w.cancelPendingAnalysis(uri)
 }
 
 // GetMarkdownDocumentSnapshot returns an immutable snapshot of a markdown document.
-func (w *Workspace) GetMarkdownDocumentSnapshot(uri string) *MarkdownDocumentSnapshot {
+func (w *Workspace) GetMarkdownDocumentSnapshot(uri string) *markdownDocumentSnapshot {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -1181,7 +1162,7 @@ func (w *Workspace) GetMarkdownDocumentSnapshot(uri string) *MarkdownDocumentSna
 	snapshots := make([]*analysis.Snapshot, len(md.Snapshots))
 	copy(snapshots, md.Snapshots)
 
-	return &MarkdownDocumentSnapshot{
+	return &markdownDocumentSnapshot{
 		URI:       md.URI,
 		Version:   md.Version,
 		Blocks:    blocks,
@@ -1202,7 +1183,7 @@ func (w *Workspace) GetMarkdownCurrentText(uri string) (string, bool) {
 }
 
 // ScheduleMarkdownAnalysis schedules a debounced analysis for a markdown document.
-func (w *Workspace) ScheduleMarkdownAnalysis(notify Notifier, uri string) {
+func (w *Workspace) ScheduleMarkdownAnalysis(notify notifyFunc, uri string) {
 	w.debounceMu.Lock()
 	defer w.debounceMu.Unlock()
 
@@ -1211,7 +1192,7 @@ func (w *Workspace) ScheduleMarkdownAnalysis(notify Notifier, uri string) {
 		existing.cancel()
 	}
 
-	analyzeCtx, cancel := context.WithCancel(context.Background())
+	analyzeCtx, cancel := context.WithCancel(w.bgCtx)
 	entry := &debounceEntry{cancel: cancel}
 
 	entry.timer = time.AfterFunc(debounceDelay, func() {
@@ -1232,7 +1213,7 @@ func (w *Workspace) ScheduleMarkdownAnalysis(notify Notifier, uri string) {
 }
 
 // AnalyzeMarkdownAndPublish analyzes a markdown document's code blocks and publishes diagnostics.
-func (w *Workspace) AnalyzeMarkdownAndPublish(notify Notifier, analyzeCtx context.Context, uri string) {
+func (w *Workspace) AnalyzeMarkdownAndPublish(notify notifyFunc, analyzeCtx context.Context, uri string) {
 	// Read text and version under lock
 	w.mu.RLock()
 	md := w.markdownDocs[uri]
@@ -1248,7 +1229,7 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(notify Notifier, analyzeCtx contex
 	blocks := markdown.ExtractCodeBlocks(text)
 
 	// Assign virtual SourceIDs
-	path, err := URIToPath(uri)
+	path, err := lsputil.URIToPath(uri)
 	if err != nil {
 		w.logger.Warn("failed to parse markdown URI", slog.String("uri", uri), slog.String("error", err.Error()))
 		return
@@ -1309,7 +1290,7 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(notify Notifier, analyzeCtx contex
 	md.Blocks = validBlocks
 	md.Snapshots = snapshots
 
-	snap := &MarkdownDocumentSnapshot{
+	snap := &markdownDocumentSnapshot{
 		URI:       md.URI,
 		Version:   md.Version,
 		Blocks:    make([]markdown.CodeBlock, len(validBlocks)),
@@ -1325,7 +1306,7 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(notify Notifier, analyzeCtx contex
 
 // publishMarkdownDiagnostics collects diagnostics from all block snapshots,
 // remaps positions from block-local to markdown coordinates, and publishes.
-func (w *Workspace) publishMarkdownDiagnostics(notify Notifier, snap *MarkdownDocumentSnapshot) {
+func (w *Workspace) publishMarkdownDiagnostics(notify notifyFunc, snap *markdownDocumentSnapshot) {
 	if notify == nil {
 		return
 	}
@@ -1373,7 +1354,7 @@ func (w *Workspace) publishMarkdownDiagnostics(notify Notifier, snap *MarkdownDo
 			// Remap RelatedInformation URIs and ranges
 			if len(diag.RelatedInformation) > 0 {
 				block := snap.Blocks[i]
-				expectedURI := PathToURI(block.SourceID.String())
+				expectedURI := lsputil.PathToURI(block.SourceID.String())
 				var remapped []protocol.DiagnosticRelatedInformation
 				for _, rel := range diag.RelatedInformation {
 					if rel.Location.URI != expectedURI {
@@ -1420,8 +1401,10 @@ func (w *Workspace) publishMarkdownDiagnostics(notify Notifier, snap *MarkdownDo
 	if allDiagnostics == nil {
 		allDiagnostics = []protocol.Diagnostic{}
 	}
+	v := protocol.Integer(snap.Version) //nolint:gosec // LSP version fits int32
 	notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 		URI:         snap.URI,
+		Version:     &v,
 		Diagnostics: allDiagnostics,
 	})
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/location"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
@@ -151,11 +152,8 @@ func TestSymbol_Fields(t *testing.T) {
 	}
 }
 
-// =============================================================================
 // Critical Test Gates: LSP Overlay and Registry Contracts
 // These tests validate critical contracts for the LSP overlay and registry.
-// =============================================================================
-
 func TestOverlayPrecedenceOverDisk(t *testing.T) {
 	// Validates overlay content wins over disk content.
 	// Given: disk file contains schema "DiskVersion"
@@ -454,10 +452,6 @@ func TestLoadSources_DiskFallback(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// hasURIScheme tests
-// =============================================================================
-
 func TestHasURIScheme_FileURI(t *testing.T) {
 	t.Parallel()
 
@@ -499,9 +493,9 @@ func TestHasURIScheme_FileURI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			t.Parallel()
-			got := hasURIScheme(tt.input)
+			got := lsputil.HasURIScheme(tt.input)
 			if got != tt.want {
-				t.Errorf("hasURIScheme(%q) = %v; want %v", tt.input, got, tt.want)
+				t.Errorf("lsputil.HasURIScheme(%q) = %v; want %v", tt.input, got, tt.want)
 			}
 		})
 	}

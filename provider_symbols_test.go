@@ -419,8 +419,6 @@ func TestBuildDocumentSymbols_DataType(t *testing.T) {
 func TestSymbolKindToLSP(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-
 	tests := []struct {
 		kind     symbols.SymbolKind
 		expected protocol.SymbolKind
@@ -439,7 +437,7 @@ func TestSymbolKindToLSP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.kind.String(), func(t *testing.T) {
 			t.Parallel()
-			result := s.symbolKindToLSP(tt.kind)
+			result := symbolKindToLSP(tt.kind)
 			if result != tt.expected {
 				t.Errorf("symbolKindToLSP(%v) = %v; want %v", tt.kind, result, tt.expected)
 			}

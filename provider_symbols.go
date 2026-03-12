@@ -3,10 +3,12 @@ package lsp
 import (
 	"context"
 	"fmt"
+	"time"
 
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
@@ -14,6 +16,7 @@ import (
 //
 //nolint:nilnil // LSP protocol: nil result means no symbols
 func (s *Server) textDocumentDocumentSymbol(_ context.Context, params *protocol.DocumentSymbolParams) (any, error) {
+	defer s.logTiming("textDocument/documentSymbol", time.Now())
 	uri := params.TextDocument.URI
 
 	s.logger.Debug("documentSymbol request", "uri", uri)
@@ -38,7 +41,7 @@ func (s *Server) textDocumentDocumentSymbol(_ context.Context, params *protocol.
 
 // markdownDocumentSymbols returns document symbols from all code blocks in a markdown file.
 // Unlike cursor-centric handlers, this iterates all blocks and aggregates symbols.
-func (s *Server) markdownDocumentSymbols(mdSnap *MarkdownDocumentSnapshot) []protocol.DocumentSymbol {
+func (s *Server) markdownDocumentSymbols(mdSnap *markdownDocumentSnapshot) []protocol.DocumentSymbol {
 	var allSymbols []protocol.DocumentSymbol
 
 	for i, snapshot := range mdSnap.Snapshots {
@@ -60,7 +63,7 @@ func (s *Server) markdownDocumentSymbols(mdSnap *MarkdownDocumentSnapshot) []pro
 // remapDocumentSymbolRanges remaps Range and SelectionRange of document symbols
 // from block-local coordinates to markdown coordinates. Recursively processes Children.
 // Returns nil for empty input. Creates copies to avoid mutating the originals.
-func remapDocumentSymbolRanges(symbols []protocol.DocumentSymbol, mdSnap *MarkdownDocumentSnapshot, blockIndex int) []protocol.DocumentSymbol {
+func remapDocumentSymbolRanges(symbols []protocol.DocumentSymbol, mdSnap *markdownDocumentSnapshot, blockIndex int) []protocol.DocumentSymbol {
 	if len(symbols) == 0 {
 		return nil
 	}
@@ -100,7 +103,7 @@ func remapDocumentSymbolRanges(symbols []protocol.DocumentSymbol, mdSnap *Markdo
 
 // documentSymbolsFor returns document symbols for the given document within a snapshot.
 // Returns nil when no symbols are available.
-func (s *Server) documentSymbolsFor(snapshot *analysis.Snapshot, doc *DocumentSnapshot) []protocol.DocumentSymbol {
+func (s *Server) documentSymbolsFor(snapshot *analysis.Snapshot, doc *documentSnapshot) []protocol.DocumentSymbol {
 	if snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for documentSymbol",
 			"uri", doc.URI,
@@ -245,20 +248,20 @@ func (s *Server) buildDocumentSymbols(idx *symbols.SymbolIndex, snapshot *analys
 	}
 
 	// Second pass: attach children to parents
-	result := s.attachChildren(topLevel, childrenByParent)
+	result := attachChildren(topLevel, childrenByParent)
 
 	return result
 }
 
 // attachChildren recursively attaches children to parent symbols.
-func (s *Server) attachChildren(symbols []docSymWithKey, childrenByParent map[string][]docSymWithKey) []protocol.DocumentSymbol {
+func attachChildren(symbols []docSymWithKey, childrenByParent map[string][]docSymWithKey) []protocol.DocumentSymbol {
 	result := make([]protocol.DocumentSymbol, len(symbols))
 
 	for i, dsym := range symbols {
 		result[i] = dsym.sym
 		if children, ok := childrenByParent[dsym.key]; ok {
 			// Recursively attach children to these children
-			attachedChildren := s.attachChildren(children, childrenByParent)
+			attachedChildren := attachChildren(children, childrenByParent)
 			result[i].Children = attachedChildren
 		}
 	}
@@ -268,7 +271,7 @@ func (s *Server) attachChildren(symbols []docSymWithKey, childrenByParent map[st
 
 // symbolToDocumentSymbol converts a Symbol to a protocol.DocumentSymbol.
 func (s *Server) symbolToDocumentSymbol(sym *symbols.Symbol, snapshot *analysis.Snapshot) protocol.DocumentSymbol {
-	kind := s.symbolKindToLSP(sym.Kind)
+	kind := symbolKindToLSP(sym.Kind)
 
 	// Build detail string
 	detail := sym.Detail
@@ -279,8 +282,8 @@ func (s *Server) symbolToDocumentSymbol(sym *symbols.Symbol, snapshot *analysis.
 	// Convert spans using proper UTF-16 conversion
 	enc := s.workspace.PositionEncoding()
 
-	rangeStart, rangeEnd, rangeOk := SpanToLSPRange(snapshot.Sources, sym.Range, enc)
-	selStart, selEnd, selOk := SpanToLSPRange(snapshot.Sources, sym.Selection, enc)
+	rangeStart, rangeEnd, rangeOk := lsputil.SpanToLSPRange(snapshot.Sources, sym.Range, enc)
+	selStart, selEnd, selOk := lsputil.SpanToLSPRange(snapshot.Sources, sym.Selection, enc)
 
 	// Build ranges (fallback to naive conversion if needed)
 	var symRange, selRange protocol.Range
@@ -330,7 +333,7 @@ func (s *Server) symbolToDocumentSymbol(sym *symbols.Symbol, snapshot *analysis.
 }
 
 // symbolKindToLSP converts our SymbolKind to LSP SymbolKind.
-func (s *Server) symbolKindToLSP(kind symbols.SymbolKind) protocol.SymbolKind {
+func symbolKindToLSP(kind symbols.SymbolKind) protocol.SymbolKind {
 	switch kind {
 	case symbols.SymbolSchema:
 		return protocol.SymbolKindModule

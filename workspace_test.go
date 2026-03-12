@@ -13,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/location"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 )
 
 func TestURIToPath_Valid(t *testing.T) {
@@ -32,12 +33,12 @@ func TestURIToPath_Valid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := URIToPath(tt.uri)
+			got, err := lsputil.URIToPath(tt.uri)
 			if err != nil {
-				t.Fatalf("URIToPath(%q) error: %v", tt.uri, err)
+				t.Fatalf("lsputil.URIToPath(%q) error: %v", tt.uri, err)
 			}
 			if got != tt.want {
-				t.Errorf("URIToPath(%q) = %q; want %q", tt.uri, got, tt.want)
+				t.Errorf("lsputil.URIToPath(%q) = %q; want %q", tt.uri, got, tt.want)
 			}
 		})
 	}
@@ -58,9 +59,9 @@ func TestURIToPath_InvalidScheme(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := URIToPath(tt.uri)
+			_, err := lsputil.URIToPath(tt.uri)
 			if err == nil {
-				t.Errorf("URIToPath(%q) = nil error; want error", tt.uri)
+				t.Errorf("lsputil.URIToPath(%q) = nil error; want error", tt.uri)
 			}
 		})
 	}
@@ -70,9 +71,9 @@ func TestURIToPath_InvalidURI(t *testing.T) {
 	t.Parallel()
 
 	// Test with malformed URI
-	_, err := URIToPath("file://[::1%eth0/bad")
+	_, err := lsputil.URIToPath("file://[::1%eth0/bad")
 	if err == nil {
-		t.Error("URIToPath(malformed URI) = nil error; want error")
+		t.Error("lsputil.URIToPath(malformed URI) = nil error; want error")
 	}
 }
 
@@ -93,9 +94,9 @@ func TestPathToURI_Absolute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := PathToURI(tt.path)
+			got := lsputil.PathToURI(tt.path)
 			if got != tt.want {
-				t.Errorf("PathToURI(%q) = %q; want %q", tt.path, got, tt.want)
+				t.Errorf("lsputil.PathToURI(%q) = %q; want %q", tt.path, got, tt.want)
 			}
 		})
 	}
@@ -113,10 +114,10 @@ func TestURIPathRoundtrip(t *testing.T) {
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
 			t.Parallel()
-			uri := PathToURI(path)
-			got, err := URIToPath(uri)
+			uri := lsputil.PathToURI(path)
+			got, err := lsputil.URIToPath(uri)
 			if err != nil {
-				t.Fatalf("URIToPath(PathToURI(%q)) error: %v", path, err)
+				t.Fatalf("lsputil.URIToPath(lsputil.PathToURI(%q)) error: %v", path, err)
 			}
 			if got != path {
 				t.Errorf("roundtrip(%q) = %q; want original", path, got)
@@ -205,7 +206,7 @@ func TestWorkspace_AddRoot_SymlinkResolution(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Add root via symlink path
-	ws.AddRoot(PathToURI(linkDir))
+	ws.AddRoot(lsputil.PathToURI(linkDir))
 
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
@@ -251,7 +252,7 @@ func TestWorkspace_FindModuleRoot_CrossSymlink(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Add root via canonical path
-	ws.AddRoot(PathToURI(canonicalProject))
+	ws.AddRoot(lsputil.PathToURI(canonicalProject))
 
 	// File path via symlink should still match (after canonicalization)
 	symlinkFilePath := linkProject + "/schema.yammm"
@@ -636,8 +637,8 @@ func TestUpdateDependencies_AddsReverseDeps(t *testing.T) {
 	}
 
 	// Check reverse deps
-	partsURI := PathToURI("/parts.yammm")
-	utilsURI := PathToURI("/utils.yammm")
+	partsURI := lsputil.PathToURI("/parts.yammm")
+	utilsURI := lsputil.PathToURI("/utils.yammm")
 
 	if _, ok := ws.reverseDeps[partsURI][entryURI]; !ok {
 		t.Errorf("reverseDeps[%s] should contain %s", partsURI, entryURI)
@@ -670,13 +671,13 @@ func TestUpdateDependencies_ClearsOldDeps(t *testing.T) {
 	}
 
 	// Reverse deps for parts should be cleaned up
-	partsURI := PathToURI("/parts.yammm")
+	partsURI := lsputil.PathToURI("/parts.yammm")
 	if _, ok := ws.reverseDeps[partsURI]; ok {
 		t.Errorf("reverseDeps[%s] should be deleted (empty)", partsURI)
 	}
 
 	// Reverse deps for utils should exist
-	utilsURI := PathToURI("/utils.yammm")
+	utilsURI := lsputil.PathToURI("/utils.yammm")
 	if _, ok := ws.reverseDeps[utilsURI][entryURI]; !ok {
 		t.Errorf("reverseDeps[%s] should contain %s", utilsURI, entryURI)
 	}
@@ -705,7 +706,7 @@ func TestUpdateDependencies_ClearsAllOnNil(t *testing.T) {
 	}
 
 	// Reverse deps should be cleaned up
-	partsURI := PathToURI("/parts.yammm")
+	partsURI := lsputil.PathToURI("/parts.yammm")
 	if _, ok := ws.reverseDeps[partsURI]; ok {
 		t.Errorf("reverseDeps[%s] should be deleted", partsURI)
 	}
@@ -727,7 +728,7 @@ func TestUpdateDependencies_MultipleEntries(t *testing.T) {
 	ws.mu.RLock()
 
 	// parts.yammm should have two reverse deps
-	partsURI := PathToURI("/parts.yammm")
+	partsURI := lsputil.PathToURI("/parts.yammm")
 	if len(ws.reverseDeps[partsURI]) != 2 {
 		t.Errorf("reverseDeps[%s] has %d entries; want 2", partsURI, len(ws.reverseDeps[partsURI]))
 	}
@@ -779,12 +780,12 @@ func TestBuildCanonicalToURIMap_SymlinkResolution(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Open document via symlink URI
-	linkURI := PathToURI(linkPath)
+	linkURI := lsputil.PathToURI(linkPath)
 	ws.DocumentOpened(linkURI, 1, "content")
 
 	// Build the canonical mapping
 	ws.mu.RLock()
-	mapping := ws.buildCanonicalToURIMap()
+	mapping := ws.buildCanonicalToURIMapLocked()
 	ws.mu.RUnlock()
 
 	// The mapping should map the canonical (resolved) path to the symlink URI
@@ -817,12 +818,12 @@ func TestBuildCanonicalToURIMap_NoSymlinks(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Open document via real path
-	realURI := PathToURI(realPath)
+	realURI := lsputil.PathToURI(realPath)
 	ws.DocumentOpened(realURI, 1, "content")
 
 	// Build the canonical mapping
 	ws.mu.RLock()
-	mapping := ws.buildCanonicalToURIMap()
+	mapping := ws.buildCanonicalToURIMapLocked()
 	ws.mu.RUnlock()
 
 	// The mapping should map the canonical path to the original URI
@@ -870,11 +871,11 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Open document via symlink URI FIRST (openOrder=1)
-	linkURI := PathToURI(linkPath)
+	linkURI := lsputil.PathToURI(linkPath)
 	ws.DocumentOpened(linkURI, 1, "content via symlink")
 
 	// Open same document via real path URI SECOND (openOrder=2)
-	realURI := PathToURI(realPath)
+	realURI := lsputil.PathToURI(realPath)
 	ws.DocumentOpened(realURI, 1, "content via real path")
 
 	// Both documents should be tracked (different URIs)
@@ -886,7 +887,7 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 
 	// Build the canonical mapping - should prefer first-opened (symlink) due to lower OpenOrder
 	ws.mu.RLock()
-	mapping := ws.buildCanonicalToURIMap()
+	mapping := ws.buildCanonicalToURIMapLocked()
 	ws.mu.RUnlock()
 
 	if docURI, ok := mapping[canonicalRealPath]; ok {
@@ -902,7 +903,7 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 
 	// Rebuild mapping - should now prefer the real path URI (only one remaining)
 	ws.mu.RLock()
-	mapping2 := ws.buildCanonicalToURIMap()
+	mapping2 := ws.buildCanonicalToURIMapLocked()
 	ws.mu.RUnlock()
 
 	if docURI, ok := mapping2[canonicalRealPath]; ok {
@@ -928,12 +929,12 @@ func TestRemapToOpenDocURI_MatchFound(t *testing.T) {
 	}
 
 	// Diagnostic URI uses canonical path
-	diagURI := PathToURI(canonicalPath)
+	diagURI := lsputil.PathToURI(canonicalPath)
 
 	// Should remap to symlink URI
-	result := ws.remapToOpenDocURI(diagURI, mapping)
+	result := ws.remapToOpenDocURILocked(diagURI, mapping)
 	if result != symlinkURI {
-		t.Errorf("remapToOpenDocURI() = %q; want %q", result, symlinkURI)
+		t.Errorf("remapToOpenDocURILocked() = %q; want %q", result, symlinkURI)
 	}
 }
 
@@ -950,9 +951,9 @@ func TestRemapToOpenDocURI_NoMatch(t *testing.T) {
 	diagURI := "file:///some/path/schema.yammm"
 
 	// Should return original URI unchanged
-	result := ws.remapToOpenDocURI(diagURI, mapping)
+	result := ws.remapToOpenDocURILocked(diagURI, mapping)
 	if result != diagURI {
-		t.Errorf("remapToOpenDocURI() = %q; want original %q", result, diagURI)
+		t.Errorf("remapToOpenDocURILocked() = %q; want original %q", result, diagURI)
 	}
 }
 
@@ -968,9 +969,9 @@ func TestRemapToOpenDocURI_InvalidURI(t *testing.T) {
 
 	// Invalid URI should be returned unchanged
 	invalidURI := "http://not-a-file-uri"
-	result := ws.remapToOpenDocURI(invalidURI, mapping)
+	result := ws.remapToOpenDocURILocked(invalidURI, mapping)
 	if result != invalidURI {
-		t.Errorf("remapToOpenDocURI() = %q; want original %q", result, invalidURI)
+		t.Errorf("remapToOpenDocURILocked() = %q; want original %q", result, invalidURI)
 	}
 }
 
@@ -987,10 +988,10 @@ func TestRemapToOpenDocURI_RawPathNoMatch(t *testing.T) {
 	rawPath := "/some/path/schema.yammm"
 
 	// Should convert to proper file:// URI for protocol correctness
-	result := ws.remapToOpenDocURI(rawPath, mapping)
+	result := ws.remapToOpenDocURILocked(rawPath, mapping)
 	expectedURI := "file:///some/path/schema.yammm"
 	if result != expectedURI {
-		t.Errorf("remapToOpenDocURI(%q) = %q; want %q", rawPath, result, expectedURI)
+		t.Errorf("remapToOpenDocURILocked(%q) = %q; want %q", rawPath, result, expectedURI)
 	}
 }
 
@@ -1008,9 +1009,9 @@ func TestRemapToOpenDocURI_RawPathWithMatch(t *testing.T) {
 	}
 
 	// Should return the mapped URI
-	result := ws.remapToOpenDocURI(rawPath, mapping)
+	result := ws.remapToOpenDocURILocked(rawPath, mapping)
 	if result != openDocURI {
-		t.Errorf("remapToOpenDocURI(%q) = %q; want %q", rawPath, result, openDocURI)
+		t.Errorf("remapToOpenDocURILocked(%q) = %q; want %q", rawPath, result, openDocURI)
 	}
 }
 
@@ -1030,9 +1031,9 @@ func TestRemapToOpenDocURI_NonFileURIPreserved(t *testing.T) {
 	}
 
 	for _, uri := range testCases {
-		result := ws.remapToOpenDocURI(uri, mapping)
+		result := ws.remapToOpenDocURILocked(uri, mapping)
 		if result != uri {
-			t.Errorf("remapToOpenDocURI(%q) = %q; want original preserved", uri, result)
+			t.Errorf("remapToOpenDocURILocked(%q) = %q; want original preserved", uri, result)
 		}
 	}
 }
@@ -1068,12 +1069,12 @@ func TestPublishSnapshotDiagnostics_SymlinkURIRemapping(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Open document via symlink URI
-	linkURI := PathToURI(linkPath)
+	linkURI := lsputil.PathToURI(linkPath)
 	ws.DocumentOpened(linkURI, 1, "content")
 
 	// Create a snapshot with diagnostics using the canonical (resolved) path
 	// This simulates what the loader produces
-	canonicalURI := PathToURI(canonicalRealPath)
+	canonicalURI := lsputil.PathToURI(canonicalRealPath)
 	snapshot := &analysis.Snapshot{
 		CreatedAt:    time.Now(),
 		EntryVersion: 1,
@@ -1087,7 +1088,7 @@ func TestPublishSnapshotDiagnostics_SymlinkURIRemapping(t *testing.T) {
 
 	// Use computePublicationPlan to test the remapping logic
 	// (without needing a real glsp.Context)
-	diagsByURI, _ := ws.computePublicationPlan(linkURI, snapshot)
+	diagsByURI, _, _ := ws.computePublicationPlan(linkURI, snapshot)
 
 	// The diagnostic should be remapped to the symlink URI
 	if len(diagsByURI) == 0 {
@@ -1134,11 +1135,11 @@ func TestPublishSnapshotDiagnostics_RelatedInfoURIRemapping(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Open document via symlink URI
-	linkURI := PathToURI(linkPath)
+	linkURI := lsputil.PathToURI(linkPath)
 	ws.DocumentOpened(linkURI, 1, "content")
 
 	// Create a snapshot with RelatedInformation also using canonical path
-	canonicalURI := PathToURI(canonicalRealPath)
+	canonicalURI := lsputil.PathToURI(canonicalRealPath)
 	snapshot := &analysis.Snapshot{
 		CreatedAt:    time.Now(),
 		EntryVersion: 1,
@@ -1150,7 +1151,7 @@ func TestPublishSnapshotDiagnostics_RelatedInfoURIRemapping(t *testing.T) {
 		},
 	}
 
-	diagsByURI, _ := ws.computePublicationPlan(linkURI, snapshot)
+	diagsByURI, _, _ := ws.computePublicationPlan(linkURI, snapshot)
 
 	// Check that the diagnostic is published under the symlink URI
 	diags, ok := diagsByURI[linkURI]
@@ -1225,10 +1226,6 @@ func evalSymlinks(path string) (string, error) {
 	return filepath.EvalSymlinks(path)
 }
 
-// =============================================================================
-// Multi-Document Diagnostic Isolation Tests (Priority 5: Test Coverage Gaps)
-// =============================================================================
-
 func TestComputePublicationPlan_PerEntryIsolation(t *testing.T) {
 	// Test that publishedByEntry prevents cross-entry contamination:
 	// - main.yammm publishes diagnostics for main.yammm and parts.yammm
@@ -1257,7 +1254,7 @@ func TestComputePublicationPlan_PerEntryIsolation(t *testing.T) {
 		},
 	}
 
-	diagsByURI, staleURIs := ws.computePublicationPlan(mainURI, mainSnapshot)
+	diagsByURI, staleURIs, _ := ws.computePublicationPlan(mainURI, mainSnapshot)
 
 	// Should have diagnostics for both main and parts
 	if len(diagsByURI) != 2 {
@@ -1277,7 +1274,7 @@ func TestComputePublicationPlan_PerEntryIsolation(t *testing.T) {
 		},
 	}
 
-	diagsByURI, _ = ws.computePublicationPlan(otherURI, otherSnapshot)
+	diagsByURI, _, _ = ws.computePublicationPlan(otherURI, otherSnapshot)
 
 	// Should have diagnostics only for other
 	if len(diagsByURI) != 1 {
@@ -1295,7 +1292,7 @@ func TestComputePublicationPlan_PerEntryIsolation(t *testing.T) {
 		LSPDiagnostics: []analysis.URIDiagnostic{}, // No errors
 	}
 
-	diagsByURI, staleURIs = ws.computePublicationPlan(mainURI, emptyMainSnapshot)
+	diagsByURI, staleURIs, _ = ws.computePublicationPlan(mainURI, emptyMainSnapshot)
 
 	// Should have no new diagnostics
 	if len(diagsByURI) != 0 {
@@ -1373,7 +1370,7 @@ func TestComputePublicationPlan_SharedImportMultipleEntries(t *testing.T) {
 		EntryVersion:   2,
 		LSPDiagnostics: []analysis.URIDiagnostic{},
 	}
-	_, staleURIs := ws.computePublicationPlan(mainURI, emptyMainSnapshot)
+	_, staleURIs, _ := ws.computePublicationPlan(mainURI, emptyMainSnapshot)
 
 	// main and shared should be stale for main's entry
 	staleSet := make(map[string]struct{})
@@ -1435,7 +1432,7 @@ func TestComputePublicationPlan_DocumentCloseClearsAllEntryURIs(t *testing.T) {
 		EntryVersion:   2,
 		LSPDiagnostics: nil,
 	}
-	_, staleURIs := ws.computePublicationPlan(mainURI, closeSnapshot)
+	_, staleURIs, _ := ws.computePublicationPlan(mainURI, closeSnapshot)
 
 	// Both main and parts should be stale
 	if len(staleURIs) != 2 {
@@ -1451,10 +1448,6 @@ func TestComputePublicationPlan_DocumentCloseClearsAllEntryURIs(t *testing.T) {
 		t.Errorf("published should be empty after close; got %d", len(published))
 	}
 }
-
-// =============================================================================
-// FileChanged Symlink Tests (Priority 5: Test Coverage Gaps)
-// =============================================================================
 
 func TestWorkspace_FileChanged_SymlinkResolution(t *testing.T) {
 	// Test that FileChanged correctly resolves symlinked paths for reverse deps
@@ -1497,7 +1490,7 @@ func TestWorkspace_FileChanged_SymlinkResolution(t *testing.T) {
 
 	// Verify reverse deps are set up
 	ws.mu.RLock()
-	canonicalPartsURI := PathToURI(canonicalParts)
+	canonicalPartsURI := lsputil.PathToURI(canonicalParts)
 	deps := ws.reverseDeps[canonicalPartsURI]
 	ws.mu.RUnlock()
 
@@ -1507,18 +1500,18 @@ func TestWorkspace_FileChanged_SymlinkResolution(t *testing.T) {
 
 	// FileChanged with symlinked path (linked/parts.yammm)
 	linkedParts := linkedDir + "/parts.yammm"
-	linkedPartsURI := PathToURI(linkedParts)
+	linkedPartsURI := lsputil.PathToURI(linkedParts)
 
 	// Track if ScheduleAnalysis is called
 	// We can't easily test the actual scheduling without a glsp.Context,
 	// but we can verify the path resolution works by checking the deps lookup
 
 	// Manually test the canonicalization logic that FileChanged uses
-	path, _ := URIToPath(linkedPartsURI)
+	path, _ := lsputil.URIToPath(linkedPartsURI)
 	resolved, _ := filepath.EvalSymlinks(path)
 	resolvedPath := filepath.Clean(resolved)
 	resolvedSourceID, _ := location.SourceIDFromAbsolutePath(resolvedPath)
-	resolvedURI := PathToURI(resolvedSourceID.String())
+	resolvedURI := lsputil.PathToURI(resolvedSourceID.String())
 
 	// The resolved URI should match the canonical parts URI
 	if resolvedURI != canonicalPartsURI {
@@ -1550,7 +1543,7 @@ func TestWorkspace_FileChanged_CanonicalPathMatching(t *testing.T) {
 	ws.UpdateDependencies(mainURI, []string{canonicalPath})
 
 	// Verify the reverse dependency uses the canonical URI
-	canonicalURI := PathToURI(canonicalPath)
+	canonicalURI := lsputil.PathToURI(canonicalPath)
 
 	ws.mu.RLock()
 	deps := ws.reverseDeps[canonicalURI]
@@ -1572,10 +1565,6 @@ func TestWorkspace_FileChanged_CanonicalPathMatching(t *testing.T) {
 		t.Error("canonical path lookup should find main.yammm")
 	}
 }
-
-// =============================================================================
-// Debounce Race Condition Tests (Priority 1: High-priority blockers)
-// =============================================================================
 
 // TestScheduleAnalysis_EntryPointerIdentity verifies that the debounce cleanup
 // uses pointer identity to avoid deleting newer entries. This is a regression
@@ -1798,10 +1787,6 @@ func TestScheduleMarkdownAnalysis_RescheduleWhilePending(t *testing.T) {
 	ws.cancelPendingAnalysis(uri)
 }
 
-// =============================================================================
-// RemapPathToURI Tests: Outbound URIs in Definition Provider
-// =============================================================================
-
 func TestRemapPathToURI_OpenDocument(t *testing.T) {
 	t.Parallel()
 
@@ -1837,7 +1822,7 @@ func TestRemapPathToURI_NotOpen(t *testing.T) {
 
 	// RemapPathToURI should return a file:// URI for the canonical path
 	result := ws.RemapPathToURI(canonicalPath)
-	expected := PathToURI(canonicalPath)
+	expected := lsputil.PathToURI(canonicalPath)
 	if result != expected {
 		t.Errorf("RemapPathToURI(%q) = %q; want %q", canonicalPath, result, expected)
 	}
@@ -1874,7 +1859,7 @@ func TestRemapPathToURI_SymlinkResolution(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Open document via symlink URI
-	linkURI := PathToURI(linkPath)
+	linkURI := lsputil.PathToURI(linkPath)
 	ws.DocumentOpened(linkURI, 1, "content")
 
 	// RemapPathToURI with canonical path should return the symlink URI
@@ -1915,11 +1900,11 @@ func TestRemapPathToURI_MultipleDocumentsSameCanonical(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Open via symlink FIRST (lower OpenOrder)
-	linkURI := PathToURI(linkPath)
+	linkURI := lsputil.PathToURI(linkPath)
 	ws.DocumentOpened(linkURI, 1, "content via symlink")
 
 	// Open via real path SECOND (higher OpenOrder)
-	realURI := PathToURI(realPath)
+	realURI := lsputil.PathToURI(realPath)
 	ws.DocumentOpened(realURI, 1, "content via real path")
 
 	// RemapPathToURI should prefer the first-opened (symlink) URI
@@ -1978,14 +1963,14 @@ func TestComputeBraceDepths_CRLF(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, _ := ComputeBraceDepths(tt.text)
+			got, _ := computeBraceDepths(tt.text)
 			if len(got) != len(tt.want) {
-				t.Errorf("ComputeBraceDepths() returned %d lines; want %d lines", len(got), len(tt.want))
+				t.Errorf("computeBraceDepths() returned %d lines; want %d lines", len(got), len(tt.want))
 				return
 			}
 			for i := range got {
 				if got[i] != tt.want[i] {
-					t.Errorf("ComputeBraceDepths() line %d depth = %d; want %d", i, got[i], tt.want[i])
+					t.Errorf("computeBraceDepths() line %d depth = %d; want %d", i, got[i], tt.want[i])
 				}
 			}
 		})
@@ -2046,9 +2031,9 @@ func TestComputeBraceDepths_CommentLikeStrings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, _ := ComputeBraceDepths(tt.text)
+			got, _ := computeBraceDepths(tt.text)
 			if len(got) != len(tt.want) {
-				t.Errorf("ComputeBraceDepths() returned %d lines; want %d lines\ntext: %q",
+				t.Errorf("computeBraceDepths() returned %d lines; want %d lines\ntext: %q",
 					len(got), len(tt.want), tt.text)
 				return
 			}
@@ -2134,7 +2119,7 @@ func TestComputeBraceDepths_MultiLineBlockComments(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			gotDepths, gotInBlk := ComputeBraceDepths(tt.text)
+			gotDepths, gotInBlk := computeBraceDepths(tt.text)
 
 			if len(gotDepths) != len(tt.wantDepths) {
 				t.Errorf("depths: got %d lines; want %d lines\ntext: %q\ngot: %v",
@@ -2176,7 +2161,7 @@ func TestDocumentOpened_CRLFNormalization(t *testing.T) {
 	}
 
 	ws := NewWorkspace(nil, Config{})
-	uri := PathToURI(path)
+	uri := lsputil.PathToURI(path)
 
 	// Open document with CRLF line endings
 	textWithCRLF := "type Person {\r\n\tname string\r\n}\r\n"
@@ -2210,7 +2195,7 @@ func TestDocumentChanged_CRLFNormalization(t *testing.T) {
 	}
 
 	ws := NewWorkspace(nil, Config{})
-	uri := PathToURI(path)
+	uri := lsputil.PathToURI(path)
 
 	// Open document first (with LF)
 	ws.DocumentOpened(uri, 1, "type Test {}\n")
@@ -2241,7 +2226,7 @@ func TestDocumentChanged_VersionOrdering(t *testing.T) {
 	}
 
 	ws := NewWorkspace(nil, Config{})
-	uri := PathToURI(path)
+	uri := lsputil.PathToURI(path)
 
 	// Open document at version 5
 	ws.DocumentOpened(uri, 5, "version5")
@@ -2284,7 +2269,7 @@ func TestDocumentChanged_VersionZeroAccepted(t *testing.T) {
 	}
 
 	ws := NewWorkspace(nil, Config{})
-	uri := PathToURI(path)
+	uri := lsputil.PathToURI(path)
 
 	// Open document at version 5
 	ws.DocumentOpened(uri, 5, "version5")
@@ -2303,7 +2288,7 @@ func TestDocumentChanged_VersionZeroAccepted(t *testing.T) {
 }
 
 func TestDocumentChanged_Version0_InvalidatesLineStateCache(t *testing.T) {
-	// Tests that LineState cache is invalidated when text changes with version 0.
+	// Tests that lineState cache is invalidated when text changes with version 0.
 	// Without explicit invalidation, the cache would incorrectly remain valid
 	// because lineState.Version (0) == doc.Version (0) even though text changed.
 	t.Parallel()
@@ -2315,38 +2300,38 @@ func TestDocumentChanged_Version0_InvalidatesLineStateCache(t *testing.T) {
 	}
 
 	ws := NewWorkspace(nil, Config{})
-	uri := PathToURI(path)
+	uri := lsputil.PathToURI(path)
 
 	// Open document with version 0 and content that has brace depth 1
 	ws.DocumentOpened(uri, 0, "type A {")
 
-	// Get snapshot to trigger LineState computation
+	// Get snapshot to trigger lineState computation
 	doc1 := ws.GetDocumentSnapshot(uri)
 	if doc1 == nil {
 		t.Fatal("document not found")
 	}
-	if doc1.LineState == nil {
-		t.Fatal("LineState should be computed on first access")
+	if doc1.lineState == nil {
+		t.Fatal("lineState should be computed on first access")
 	}
 	// Verify initial brace depth
-	if len(doc1.LineState.BraceDepth) != 1 || doc1.LineState.BraceDepth[0] != 1 {
-		t.Errorf("initial BraceDepth = %v; want [1]", doc1.LineState.BraceDepth)
+	if len(doc1.lineState.BraceDepth) != 1 || doc1.lineState.BraceDepth[0] != 1 {
+		t.Errorf("initial BraceDepth = %v; want [1]", doc1.lineState.BraceDepth)
 	}
 
 	// Update with version 0 again but different content (brace depth 0)
 	ws.DocumentChanged(uri, 0, "type A {}")
 
-	// Get new snapshot - should have fresh LineState reflecting new content
+	// Get new snapshot - should have fresh lineState reflecting new content
 	doc2 := ws.GetDocumentSnapshot(uri)
 	if doc2 == nil {
 		t.Fatal("document not found after change")
 	}
-	if doc2.LineState == nil {
-		t.Fatal("LineState should be recomputed after change")
+	if doc2.lineState == nil {
+		t.Fatal("lineState should be recomputed after change")
 	}
 	// Verify brace depth reflects new content (balanced braces = depth 0)
-	if len(doc2.LineState.BraceDepth) != 1 || doc2.LineState.BraceDepth[0] != 0 {
-		t.Errorf("updated BraceDepth = %v; want [0] (cache should have been invalidated)", doc2.LineState.BraceDepth)
+	if len(doc2.lineState.BraceDepth) != 1 || doc2.lineState.BraceDepth[0] != 0 {
+		t.Errorf("updated BraceDepth = %v; want [0] (cache should have been invalidated)", doc2.lineState.BraceDepth)
 	}
 }
 
@@ -2361,7 +2346,7 @@ func TestRemapPathToURI_ForwardSlashNormalization(t *testing.T) {
 	}
 
 	ws := NewWorkspace(nil, Config{})
-	uri := PathToURI(path)
+	uri := lsputil.PathToURI(path)
 	ws.DocumentOpened(uri, 1, "type Test {}")
 
 	// On all platforms, RemapPathToURI should work with forward-slash paths

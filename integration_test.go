@@ -10,6 +10,7 @@ import (
 
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/testutil"
 	"github.com/simon-lentz/yammm/schema/load"
 )
@@ -29,13 +30,10 @@ func newTestHarness(t *testing.T, root string) *testutil.Harness {
 	return testutil.NewHarness(t, server.Mux(), root)
 }
 
-// =============================================================================
 // Integration Tests using Harness
 // These tests verify LSP handler behavior through direct handler calls.
 // Note: Tests that require notification publishing (like diagnostics) are
 // limited because glsp.Context is required for Notify calls.
-// =============================================================================
-
 func TestIntegration_InitializeSuccess(t *testing.T) {
 	// Test that server initialization succeeds
 	t.Parallel()
@@ -179,10 +177,6 @@ type Car {
 		t.Error("Definition should return nil for unopened documents")
 	}
 }
-
-// =============================================================================
-// Open-Doc vs Disk-Backed Contract Tests (Priority 5: Test Coverage Gaps)
-// =============================================================================
 
 func TestIntegration_OverlayOverridesDisk(t *testing.T) {
 	// Documents open in the editor (overlays) MUST take precedence over disk content.
@@ -359,10 +353,6 @@ type OverlayWheel {
 	// Should see OverlayWheel (from overlay), not DiskWheel (from disk)
 	testutil.AssertDocumentSymbolExists(t, symbols, "OverlayWheel")
 }
-
-// =============================================================================
-// Multi-Root Workspace Tests (Priority 4: Test Coverage Gap 4.4)
-// =============================================================================
 
 func TestIntegration_MultiRootInitialize(t *testing.T) {
 	// Test that server handles initialization with multiple workspace folders.
@@ -541,10 +531,6 @@ type User extends types.Entity {
 	}
 }
 
-// =============================================================================
-// Formatting Round-Trip Tests
-// =============================================================================
-
 func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
 	t.Parallel()
 
@@ -620,7 +606,7 @@ func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 			server := NewServer(logger, Config{ModuleRoot: tmpDir})
 			server.workspace.SetPositionEncoding(tt.encoding)
 
-			uri := PathToURI(filePath)
+			uri := lsputil.PathToURI(filePath)
 			err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
 				TextDocument: protocol.TextDocumentItem{
 					URI:        uri,

@@ -5,6 +5,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
@@ -12,20 +13,21 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
-// CompletionContext represents the context for completion.
-type CompletionContext int
+// completionContext represents the context for completion.
+type completionContext int
 
 const (
-	ContextUnknown CompletionContext = iota
-	ContextTopLevel
-	ContextTypeBody
-	ContextExtends
-	ContextPropertyType
-	ContextRelationTarget
-	ContextImportPath
+	contextUnknown completionContext = iota
+	contextTopLevel
+	contextTypeBody
+	contextExtends
+	contextPropertyType
+	contextRelationTarget
+	contextImportPath
 )
 
 // builtinTypes are the built-in type keywords available for property types.
@@ -47,6 +49,7 @@ var builtinTypes = []string{
 //
 //nolint:nilnil // LSP protocol: nil result means no completions
 func (s *Server) textDocumentCompletion(_ context.Context, params *protocol.CompletionParams) (any, error) {
+	defer s.logTiming("textDocument/completion", time.Now())
 	uri := params.TextDocument.URI
 
 	s.logger.Debug("completion request",
@@ -73,7 +76,7 @@ func (s *Server) textDocumentCompletion(_ context.Context, params *protocol.Comp
 // markdownCompletion handles completion requests within yammm code blocks in markdown files.
 //
 //nolint:nilnil // LSP protocol: nil result means no completions
-func (s *Server) markdownCompletion(params *protocol.CompletionParams, mdSnap *MarkdownDocumentSnapshot) (any, error) {
+func (s *Server) markdownCompletion(params *protocol.CompletionParams, mdSnap *markdownDocumentSnapshot) (any, error) {
 	blockPos := mdSnap.MarkdownPositionToBlock(int(params.Position.Line), int(params.Position.Character))
 	if blockPos == nil {
 		return nil, nil
@@ -98,7 +101,7 @@ func (s *Server) markdownCompletion(params *protocol.CompletionParams, mdSnap *M
 // snapshot may be nil — graceful degradation provides keywords, snippets,
 // and built-in types without a schema.
 // The line and char parameters are LSP-encoding coordinates.
-func (s *Server) completionAtPosition(snapshot *analysis.Snapshot, doc *DocumentSnapshot, line, char int) (any, error) {
+func (s *Server) completionAtPosition(snapshot *analysis.Snapshot, doc *documentSnapshot, line, char int) (any, error) {
 	if snapshot != nil && snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for completion",
 			"uri", doc.URI,
@@ -110,7 +113,7 @@ func (s *Server) completionAtPosition(snapshot *analysis.Snapshot, doc *Document
 	var byteOffset int
 	usedRegistry := false
 	if snapshot != nil && snapshot.Sources != nil {
-		if offset, ok := ByteOffsetFromLSP(
+		if offset, ok := lsputil.ByteOffsetFromLSP(
 			snapshot.Sources,
 			doc.SourceID,
 			line,
@@ -139,18 +142,18 @@ func (s *Server) completionAtPosition(snapshot *analysis.Snapshot, doc *Document
 	var items []protocol.CompletionItem
 
 	switch ctx {
-	case ContextTopLevel:
+	case contextTopLevel:
 		items = s.topLevelCompletions()
-	case ContextTypeBody:
+	case contextTypeBody:
 		items = s.typeBodyCompletions()
-	case ContextExtends:
+	case contextExtends:
 		items = s.typeCompletions(snapshot, doc.SourceID)
-	case ContextPropertyType:
+	case contextPropertyType:
 		items = s.propertyTypeCompletions(snapshot, doc.SourceID)
-	case ContextRelationTarget:
+	case contextRelationTarget:
 		items = s.typeCompletions(snapshot, doc.SourceID)
-	case ContextImportPath:
-		items = s.importCompletions()
+	case contextImportPath:
+		items = importCompletions()
 	default:
 		items = s.topLevelCompletions()
 	}
@@ -166,11 +169,11 @@ func (s *Server) completionAtPosition(snapshot *analysis.Snapshot, doc *Document
 }
 
 // detectCompletionContext analyzes text around cursor to determine context.
-// It accepts a DocumentSnapshot to leverage cached LineState for O(1) type body detection.
-func (s *Server) detectCompletionContext(doc *DocumentSnapshot, line, character int) CompletionContext {
+// It accepts a documentSnapshot to leverage cached lineState for O(1) type body detection.
+func (s *Server) detectCompletionContext(doc *documentSnapshot, line, character int) completionContext {
 	lines := strings.Split(doc.Text, "\n")
 	if line < 0 || line >= len(lines) {
-		return ContextUnknown
+		return contextUnknown
 	}
 
 	currentLine := lines[line]
@@ -182,38 +185,38 @@ func (s *Server) detectCompletionContext(doc *DocumentSnapshot, line, character 
 	beforeCursor := currentLine[:character]
 
 	// Check for import path context (before property type to avoid "import " matching)
-	if s.isImportContext(beforeCursor) {
-		return ContextImportPath
+	if isImportContext(beforeCursor) {
+		return contextImportPath
 	}
 
 	// Check for extends context
-	if s.isExtendsContext(beforeCursor, lines, line) {
-		return ContextExtends
+	if isExtendsContext(beforeCursor, lines, line) {
+		return contextExtends
 	}
 
 	// Check for relation target context (after --> or *->)
-	if s.isRelationTargetContext(beforeCursor) {
-		return ContextRelationTarget
+	if isRelationTargetContext(beforeCursor) {
+		return contextRelationTarget
 	}
 
 	// Check for property type context (identifier followed by space)
-	if s.isPropertyTypeContext(beforeCursor) {
-		return ContextPropertyType
+	if isPropertyTypeContext(beforeCursor) {
+		return contextPropertyType
 	}
 
-	// Check if we're inside a type body using cached LineState (O(1))
-	// Falls back to direct computation if LineState is unavailable.
+	// Check if we're inside a type body using cached lineState (O(1))
+	// Falls back to direct computation if lineState is unavailable.
 	// Pass character offset to handle cursor before closing brace on same line.
 	if s.isInsideTypeBody(doc, lines, line, character) {
-		return ContextTypeBody
+		return contextTypeBody
 	}
 
 	// Default to top-level
-	return ContextTopLevel
+	return contextTopLevel
 }
 
 // isExtendsContext checks if cursor is after "extends" keyword.
-func (s *Server) isExtendsContext(beforeCursor string, lines []string, currentLine int) bool {
+func isExtendsContext(beforeCursor string, lines []string, currentLine int) bool {
 	trimmed := strings.TrimSpace(beforeCursor)
 
 	// Direct match on current line
@@ -240,7 +243,7 @@ func (s *Server) isExtendsContext(beforeCursor string, lines []string, currentLi
 }
 
 // isRelationTargetContext checks if cursor is after --> or *-> (relation arrow).
-func (s *Server) isRelationTargetContext(beforeCursor string) bool {
+func isRelationTargetContext(beforeCursor string) bool {
 	trimmed := strings.TrimSpace(beforeCursor)
 
 	// Check for patterns like "--> NAME (one)" or "--> NAME (many)"
@@ -259,7 +262,7 @@ func (s *Server) isRelationTargetContext(beforeCursor string) bool {
 }
 
 // isPropertyTypeContext checks if cursor is at property type position.
-func (s *Server) isPropertyTypeContext(beforeCursor string) bool {
+func isPropertyTypeContext(beforeCursor string) bool {
 	trimmed := strings.TrimSpace(beforeCursor)
 
 	// Check if line starts with an identifier followed by space (property name position)
@@ -284,7 +287,7 @@ func (s *Server) isPropertyTypeContext(beforeCursor string) bool {
 //
 // Requires word boundary after "import" to avoid false positives on identifiers
 // like "imported_name" or "importFrom".
-func (s *Server) isImportContext(beforeCursor string) bool {
+func isImportContext(beforeCursor string) bool {
 	trimmed := strings.TrimSpace(beforeCursor)
 
 	// Not import context if we haven't typed "import" yet
@@ -394,23 +397,23 @@ func containsAsKeyword(s string) bool {
 
 // isInsideTypeBody checks if cursor is inside a type body using cached brace depth (O(1)).
 //
-// When LineState is available and valid, this uses the cached depth at the start of the
+// When lineState is available and valid, this uses the cached depth at the start of the
 // current line, then scans up to the cursor position to compute the exact depth.
-// Falls back to direct computation if LineState is unavailable or stale.
+// Falls back to direct computation if lineState is unavailable or stale.
 //
 // The cursorCol parameter is the byte offset within the current line.
-func (s *Server) isInsideTypeBody(doc *DocumentSnapshot, lines []string, currentLine, cursorCol int) bool {
+func (s *Server) isInsideTypeBody(doc *documentSnapshot, lines []string, currentLine, cursorCol int) bool {
 	// Use cached brace depth if available and matches current document version
-	if doc != nil && doc.LineState != nil && doc.LineState.Version == doc.Version {
-		if currentLine < len(doc.LineState.BraceDepth) {
+	if doc != nil && doc.lineState != nil && doc.lineState.Version == doc.Version {
+		if currentLine < len(doc.lineState.BraceDepth) {
 			// Get depth and block comment state at start of current line
 			// (these are the values at the END of the previous line)
 			startDepth := 0
 			startInBlockComment := false
-			if currentLine > 0 && currentLine-1 < len(doc.LineState.BraceDepth) {
-				startDepth = doc.LineState.BraceDepth[currentLine-1]
-				if currentLine-1 < len(doc.LineState.InBlockComment) {
-					startInBlockComment = doc.LineState.InBlockComment[currentLine-1]
+			if currentLine > 0 && currentLine-1 < len(doc.lineState.BraceDepth) {
+				startDepth = doc.lineState.BraceDepth[currentLine-1]
+				if currentLine-1 < len(doc.lineState.InBlockComment) {
+					startInBlockComment = doc.lineState.InBlockComment[currentLine-1]
 				}
 			}
 
@@ -418,7 +421,7 @@ func (s *Server) isInsideTypeBody(doc *DocumentSnapshot, lines []string, current
 			if startDepth <= 0 {
 				// But check if there's an opening brace before cursor on this line
 				if currentLine < len(lines) {
-					return s.hasNetPositiveDepthUpToColumn(lines[currentLine], cursorCol, startInBlockComment)
+					return hasNetPositiveDepthUpToColumn(lines[currentLine], cursorCol, startInBlockComment)
 				}
 				return false
 			}
@@ -426,7 +429,7 @@ func (s *Server) isInsideTypeBody(doc *DocumentSnapshot, lines []string, current
 			// Start depth > 0, so we're potentially inside.
 			// Scan current line up to cursor to check if we're still inside.
 			if currentLine < len(lines) {
-				return s.depthAtColumn(lines[currentLine], cursorCol, startDepth, startInBlockComment) > 0
+				return depthAtColumn(lines[currentLine], cursorCol, startDepth, startInBlockComment) > 0
 			}
 			return startDepth > 0
 		}
@@ -435,7 +438,7 @@ func (s *Server) isInsideTypeBody(doc *DocumentSnapshot, lines []string, current
 	}
 
 	// Fallback: compute directly (O(n) where n = currentLine)
-	return s.isInsideTypeBodyDirect(lines, currentLine, cursorCol)
+	return isInsideTypeBodyDirect(lines, currentLine, cursorCol)
 }
 
 // isInsideTypeBodyDirect checks if cursor is inside a type body using token-aware brace counting.
@@ -445,148 +448,31 @@ func (s *Server) isInsideTypeBody(doc *DocumentSnapshot, lines []string, current
 // This prevents false positives from braces in comments like `// TODO: refactor { this }`.
 //
 // The cursorCol parameter is the byte offset within the current line.
-func (s *Server) isInsideTypeBodyDirect(lines []string, currentLine, cursorCol int) bool {
-	braceDepth := 0
-	inBlockComment := false
-
+func isInsideTypeBodyDirect(lines []string, currentLine, cursorCol int) bool {
+	var bs braceScanner
 	for i := 0; i <= currentLine && i < len(lines); i++ {
-		line := lines[i]
-		// On the current line, only scan up to cursor position
-		maxCol := len(line)
+		maxCol := len(lines[i])
 		if i == currentLine && cursorCol < maxCol {
 			maxCol = cursorCol
 		}
-
-		j := 0
-		for j < maxCol {
-			// Handle block comment continuation
-			if inBlockComment {
-				if j+1 < len(line) && line[j] == '*' && line[j+1] == '/' {
-					j += 2
-					inBlockComment = false
-					continue
-				}
-				j++
-				continue
-			}
-
-			ch := line[j]
-
-			// Skip line comments (rest of line)
-			if j+1 < len(line) && line[j] == '/' && line[j+1] == '/' {
-				break
-			}
-
-			// Start block comment
-			if j+1 < len(line) && line[j] == '/' && line[j+1] == '*' {
-				inBlockComment = true
-				j += 2
-				continue
-			}
-
-			// Skip string literals
-			if ch == '"' || ch == '\'' {
-				quote := ch
-				j++
-				for j < maxCol {
-					if line[j] == '\\' && j+1 < len(line) {
-						j += 2 // skip escape sequence
-						continue
-					}
-					if line[j] == quote {
-						j++
-						break
-					}
-					j++
-				}
-				continue
-			}
-
-			// Count braces
-			switch ch {
-			case '{':
-				braceDepth++
-			case '}':
-				braceDepth--
-			}
-			j++
-		}
+		bs.scanLine(lines[i], maxCol)
 	}
-
-	return braceDepth > 0
+	return bs.depth > 0
 }
 
 // hasNetPositiveDepthUpToColumn checks if there are more opening braces than closing braces
 // up to the cursor position on a single line, starting from depth 0.
 // startInBlockComment indicates whether the line starts inside a multi-line block comment.
-func (s *Server) hasNetPositiveDepthUpToColumn(line string, cursorCol int, startInBlockComment bool) bool {
-	return s.depthAtColumn(line, cursorCol, 0, startInBlockComment) > 0
+func hasNetPositiveDepthUpToColumn(line string, cursorCol int, startInBlockComment bool) bool {
+	return depthAtColumn(line, cursorCol, 0, startInBlockComment) > 0
 }
 
 // depthAtColumn computes brace depth at a given column position, starting from startDepth.
 // This properly skips braces in comments and string literals.
 // startInBlockComment indicates whether the line starts inside a multi-line block comment.
-func (s *Server) depthAtColumn(line string, cursorCol, startDepth int, startInBlockComment bool) int {
-	depth := startDepth
-	inBlockComment := startInBlockComment
-	maxCol := min(cursorCol, len(line))
-
-	j := 0
-	for j < maxCol {
-		// Handle block comment continuation from previous line
-		if inBlockComment {
-			if j+1 < len(line) && line[j] == '*' && line[j+1] == '/' {
-				j += 2
-				inBlockComment = false
-				continue
-			}
-			j++
-			continue
-		}
-
-		ch := line[j]
-
-		// Skip line comments (rest of line)
-		if j+1 < len(line) && line[j] == '/' && line[j+1] == '/' {
-			break
-		}
-
-		// Start block comment
-		if j+1 < len(line) && line[j] == '/' && line[j+1] == '*' {
-			inBlockComment = true
-			j += 2
-			continue
-		}
-
-		// Skip string literals
-		if ch == '"' || ch == '\'' {
-			quote := ch
-			j++
-			for j < maxCol {
-				if line[j] == '\\' && j+1 < len(line) {
-					j += 2 // skip escape sequence
-					continue
-				}
-				if line[j] == quote {
-					j++
-					break
-				}
-				j++
-			}
-			continue
-		}
-
-		// Count braces
-		switch ch {
-		case '{':
-			depth++
-		case '}':
-			depth--
-		}
-		j++
-	}
-
-	return depth
+func depthAtColumn(line string, cursorCol, startDepth int, startInBlockComment bool) int {
+	bs := braceScanner{depth: startDepth, inBlockComment: startInBlockComment}
+	return bs.scanLine(line, cursorCol)
 }
 
 // isIdentifier checks if a string is a valid identifier.
@@ -639,23 +525,23 @@ func (s *Server) computeByteOffsetFromText(text string, lspLine, lspChar int) in
 		return lspChar
 	default:
 		// UTF-16 (default): convert from UTF-16 code units to bytes
-		return utf16CharToByteOffset(content, 0, lspChar)
+		return lsputil.UTF16CharToByteOffset(content, 0, lspChar)
 	}
 }
 
 // topLevelCompletions returns completions for top-level context.
 func (s *Server) topLevelCompletions() []protocol.CompletionItem {
 	items := []protocol.CompletionItem{
-		s.keywordCompletion("schema", "schema \"${1:name}\"", "Schema declaration"),
-		s.keywordCompletion("import", "import \"${1:./path}\"${2: as ${3:alias}}", "Import statement"),
-		s.keywordCompletion("type", "type ${1:Name} {\n\t$0\n}", "Type declaration"),
-		s.keywordCompletion("abstract type", "abstract type ${1:Name} {\n\t$0\n}", "Abstract type declaration"),
-		s.keywordCompletion("part type", "part type ${1:Name} {\n\t$0\n}", "Part type declaration"),
+		keywordCompletion("schema", "schema \"${1:name}\"", "Schema declaration"),
+		keywordCompletion("import", "import \"${1:./path}\"${2: as ${3:alias}}", "Import statement"),
+		keywordCompletion("type", "type ${1:Name} {\n\t$0\n}", "Type declaration"),
+		keywordCompletion("abstract type", "abstract type ${1:Name} {\n\t$0\n}", "Abstract type declaration"),
+		keywordCompletion("part type", "part type ${1:Name} {\n\t$0\n}", "Part type declaration"),
 	}
 
 	// Add datatype completions (3.6)
-	items = append(items, s.keywordCompletion("datatype", "type ${1:Name} = ${2|String,Integer,Float,Boolean,UUID,Date,Timestamp,Enum,Pattern|}", "Datatype alias"))
-	items = append(items, s.keywordCompletion("datatype with constraint", "type ${1:Name} = ${2|String,Integer|}[${3:min}, ${4:max}]", "Datatype alias with numeric constraints"))
+	items = append(items, keywordCompletion("datatype", "type ${1:Name} = ${2|String,Integer,Float,Boolean,UUID,Date,Timestamp,Enum,Pattern|}", "Datatype alias"))
+	items = append(items, keywordCompletion("datatype with constraint", "type ${1:Name} = ${2|String,Integer|}[${3:min}, ${4:max}]", "Datatype alias with numeric constraints"))
 
 	return items
 }
@@ -665,15 +551,15 @@ func (s *Server) typeBodyCompletions() []protocol.CompletionItem {
 	items := []protocol.CompletionItem{
 		// Property snippets - modifiers are space-separated per grammar (only 'primary' or 'required')
 		// Format: ${N|, modifier1, modifier2|} - empty first option, space-prefixed subsequent
-		s.snippetCompletion("property", "${1:name} ${2|String,Integer,Float,Boolean,UUID|}${3|, required, primary|}", "Property declaration"),
-		s.snippetCompletion("property with constraint", "${1:name} ${2:String}[${3:1}, ${4:100}]${5|, required|}", "Property with constraint"),
+		snippetCompletion("property", "${1:name} ${2|String,Integer,Float,Boolean,UUID|}${3|, required, primary|}", "Property declaration"),
+		snippetCompletion("property with constraint", "${1:name} ${2:String}[${3:1}, ${4:100}]${5|, required|}", "Property with constraint"),
 
 		// Relation snippets
-		s.snippetCompletion("association", "--> ${1:NAME} (${2|one,many|}) ${3:TargetType}", "Association declaration"),
-		s.snippetCompletion("composition", "*-> ${1:CONTAINS} (${2|one,many|}) ${3:PartType}", "Composition declaration"),
+		snippetCompletion("association", "--> ${1:NAME} (${2|one,many|}) ${3:TargetType}", "Association declaration"),
+		snippetCompletion("composition", "*-> ${1:CONTAINS} (${2|one,many|}) ${3:PartType}", "Composition declaration"),
 
 		// Invariant snippet
-		s.snippetCompletion("invariant", "! \"${1:message}\" ${2:expression}", "Invariant declaration"),
+		snippetCompletion("invariant", "! \"${1:message}\" ${2:expression}", "Invariant declaration"),
 	}
 
 	// Add built-in types for quick access
@@ -806,16 +692,16 @@ func (s *Server) propertyTypeCompletions(snapshot *analysis.Snapshot, sourceID l
 }
 
 // importCompletions returns completions for import context.
-func (s *Server) importCompletions() []protocol.CompletionItem {
+func importCompletions() []protocol.CompletionItem {
 	// Use optional alias form: ${2: as ${3:alias}} makes the " as alias" part optional.
 	// This matches the grammar (alias is optional) and topLevelCompletions().
 	return []protocol.CompletionItem{
-		s.snippetCompletion("import", "import \"${1:./path}\"${2: as ${3:alias}}", "Import statement"),
+		snippetCompletion("import", "import \"${1:./path}\"${2: as ${3:alias}}", "Import statement"),
 	}
 }
 
 // keywordCompletion creates a keyword completion item.
-func (s *Server) keywordCompletion(label, insertText, detail string) protocol.CompletionItem {
+func keywordCompletion(label, insertText, detail string) protocol.CompletionItem {
 	kind := protocol.CompletionItemKindKeyword
 	format := protocol.InsertTextFormatSnippet
 	sortText := "0_" + label
@@ -830,7 +716,7 @@ func (s *Server) keywordCompletion(label, insertText, detail string) protocol.Co
 }
 
 // snippetCompletion creates a snippet completion item.
-func (s *Server) snippetCompletion(label, insertText, detail string) protocol.CompletionItem {
+func snippetCompletion(label, insertText, detail string) protocol.CompletionItem {
 	kind := protocol.CompletionItemKindSnippet
 	format := protocol.InsertTextFormatSnippet
 	sortText := "1_" + label
