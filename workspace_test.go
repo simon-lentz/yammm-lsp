@@ -347,7 +347,7 @@ func TestWorkspace_DocumentLifecycle(t *testing.T) {
 
 	// Close document (without glsp context, just test internal state)
 	ws.mu.Lock()
-	delete(ws.open, uri)
+	delete(ws.docs.open, uri)
 	ws.mu.Unlock()
 
 	doc = ws.GetDocumentSnapshot(uri)
@@ -533,20 +533,20 @@ func TestWorkspace_CancelPendingAnalysis(t *testing.T) {
 	uri := "file:///test.yammm"
 
 	// Simulate pending analysis with debounce entry
-	ws.debounceMu.Lock()
+	ws.sched.debounceMu.Lock()
 	cancelCalled := false
-	ws.debounces[uri] = &debounceEntry{
+	ws.sched.debounces[uri] = &debounceEntry{
 		timer:  time.NewTimer(1 * time.Hour), // Long timer
 		cancel: func() { cancelCalled = true },
 	}
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Unlock()
 
 	// Cancel should work
 	ws.cancelPendingAnalysis(uri)
 
-	ws.debounceMu.Lock()
-	_, hasEntry := ws.debounces[uri]
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Lock()
+	_, hasEntry := ws.sched.debounces[uri]
+	ws.sched.debounceMu.Unlock()
 
 	if hasEntry {
 		t.Error("cancelPendingAnalysis() should remove debounce entry")
@@ -632,18 +632,18 @@ func TestUpdateDependencies_AddsReverseDeps(t *testing.T) {
 	defer ws.mu.RUnlock()
 
 	// Check forward deps
-	if len(ws.importsByEntry[entryURI]) != 2 {
-		t.Errorf("importsByEntry has %d entries; want 2", len(ws.importsByEntry[entryURI]))
+	if len(ws.deps.importsByEntry[entryURI]) != 2 {
+		t.Errorf("importsByEntry has %d entries; want 2", len(ws.deps.importsByEntry[entryURI]))
 	}
 
 	// Check reverse deps
 	partsURI := lsputil.PathToURI("/parts.yammm")
 	utilsURI := lsputil.PathToURI("/utils.yammm")
 
-	if _, ok := ws.reverseDeps[partsURI][entryURI]; !ok {
+	if _, ok := ws.deps.reverseDeps[partsURI][entryURI]; !ok {
 		t.Errorf("reverseDeps[%s] should contain %s", partsURI, entryURI)
 	}
-	if _, ok := ws.reverseDeps[utilsURI][entryURI]; !ok {
+	if _, ok := ws.deps.reverseDeps[utilsURI][entryURI]; !ok {
 		t.Errorf("reverseDeps[%s] should contain %s", utilsURI, entryURI)
 	}
 }
@@ -666,19 +666,19 @@ func TestUpdateDependencies_ClearsOldDeps(t *testing.T) {
 	defer ws.mu.RUnlock()
 
 	// Forward deps should only have utils
-	if len(ws.importsByEntry[entryURI]) != 1 {
-		t.Errorf("importsByEntry has %d entries; want 1", len(ws.importsByEntry[entryURI]))
+	if len(ws.deps.importsByEntry[entryURI]) != 1 {
+		t.Errorf("importsByEntry has %d entries; want 1", len(ws.deps.importsByEntry[entryURI]))
 	}
 
 	// Reverse deps for parts should be cleaned up
 	partsURI := lsputil.PathToURI("/parts.yammm")
-	if _, ok := ws.reverseDeps[partsURI]; ok {
+	if _, ok := ws.deps.reverseDeps[partsURI]; ok {
 		t.Errorf("reverseDeps[%s] should be deleted (empty)", partsURI)
 	}
 
 	// Reverse deps for utils should exist
 	utilsURI := lsputil.PathToURI("/utils.yammm")
-	if _, ok := ws.reverseDeps[utilsURI][entryURI]; !ok {
+	if _, ok := ws.deps.reverseDeps[utilsURI][entryURI]; !ok {
 		t.Errorf("reverseDeps[%s] should contain %s", utilsURI, entryURI)
 	}
 }
@@ -701,13 +701,13 @@ func TestUpdateDependencies_ClearsAllOnNil(t *testing.T) {
 	defer ws.mu.RUnlock()
 
 	// Forward deps should be deleted
-	if _, ok := ws.importsByEntry[entryURI]; ok {
+	if _, ok := ws.deps.importsByEntry[entryURI]; ok {
 		t.Errorf("importsByEntry[%s] should be deleted", entryURI)
 	}
 
 	// Reverse deps should be cleaned up
 	partsURI := lsputil.PathToURI("/parts.yammm")
-	if _, ok := ws.reverseDeps[partsURI]; ok {
+	if _, ok := ws.deps.reverseDeps[partsURI]; ok {
 		t.Errorf("reverseDeps[%s] should be deleted", partsURI)
 	}
 }
@@ -729,8 +729,8 @@ func TestUpdateDependencies_MultipleEntries(t *testing.T) {
 
 	// parts.yammm should have two reverse deps
 	partsURI := lsputil.PathToURI("/parts.yammm")
-	if len(ws.reverseDeps[partsURI]) != 2 {
-		t.Errorf("reverseDeps[%s] has %d entries; want 2", partsURI, len(ws.reverseDeps[partsURI]))
+	if len(ws.deps.reverseDeps[partsURI]) != 2 {
+		t.Errorf("reverseDeps[%s] has %d entries; want 2", partsURI, len(ws.deps.reverseDeps[partsURI]))
 	}
 	ws.mu.RUnlock()
 
@@ -741,10 +741,10 @@ func TestUpdateDependencies_MultipleEntries(t *testing.T) {
 	defer ws.mu.RUnlock()
 
 	// parts.yammm should still have one reverse dep (entry2)
-	if len(ws.reverseDeps[partsURI]) != 1 {
-		t.Errorf("reverseDeps[%s] has %d entries; want 1", partsURI, len(ws.reverseDeps[partsURI]))
+	if len(ws.deps.reverseDeps[partsURI]) != 1 {
+		t.Errorf("reverseDeps[%s] has %d entries; want 1", partsURI, len(ws.deps.reverseDeps[partsURI]))
 	}
-	if _, ok := ws.reverseDeps[partsURI][entry2]; !ok {
+	if _, ok := ws.deps.reverseDeps[partsURI][entry2]; !ok {
 		t.Errorf("reverseDeps[%s] should contain %s", partsURI, entry2)
 	}
 }
@@ -785,7 +785,7 @@ func TestBuildCanonicalToURIMap_SymlinkResolution(t *testing.T) {
 
 	// Build the canonical mapping
 	ws.mu.RLock()
-	mapping := ws.buildCanonicalToURIMapLocked()
+	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.open)
 	ws.mu.RUnlock()
 
 	// The mapping should map the canonical (resolved) path to the symlink URI
@@ -823,7 +823,7 @@ func TestBuildCanonicalToURIMap_NoSymlinks(t *testing.T) {
 
 	// Build the canonical mapping
 	ws.mu.RLock()
-	mapping := ws.buildCanonicalToURIMapLocked()
+	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.open)
 	ws.mu.RUnlock()
 
 	// The mapping should map the canonical path to the original URI
@@ -880,14 +880,14 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 
 	// Both documents should be tracked (different URIs)
 	ws.mu.RLock()
-	if len(ws.open) != 2 {
-		t.Errorf("expected 2 open documents, got %d", len(ws.open))
+	if len(ws.docs.open) != 2 {
+		t.Errorf("expected 2 open documents, got %d", len(ws.docs.open))
 	}
 	ws.mu.RUnlock()
 
 	// Build the canonical mapping - should prefer first-opened (symlink) due to lower OpenOrder
 	ws.mu.RLock()
-	mapping := ws.buildCanonicalToURIMapLocked()
+	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.open)
 	ws.mu.RUnlock()
 
 	if docURI, ok := mapping[canonicalRealPath]; ok {
@@ -903,7 +903,7 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 
 	// Rebuild mapping - should now prefer the real path URI (only one remaining)
 	ws.mu.RLock()
-	mapping2 := ws.buildCanonicalToURIMapLocked()
+	mapping2 := ws.mapper.buildCanonicalToURIMap(ws.docs.open)
 	ws.mu.RUnlock()
 
 	if docURI, ok := mapping2[canonicalRealPath]; ok {
@@ -932,7 +932,7 @@ func TestRemapToOpenDocURI_MatchFound(t *testing.T) {
 	diagURI := lsputil.PathToURI(canonicalPath)
 
 	// Should remap to symlink URI
-	result := ws.remapToOpenDocURILocked(diagURI, mapping)
+	result := ws.mapper.remapToOpenDocURI(diagURI, mapping)
 	if result != symlinkURI {
 		t.Errorf("remapToOpenDocURILocked() = %q; want %q", result, symlinkURI)
 	}
@@ -951,7 +951,7 @@ func TestRemapToOpenDocURI_NoMatch(t *testing.T) {
 	diagURI := "file:///some/path/schema.yammm"
 
 	// Should return original URI unchanged
-	result := ws.remapToOpenDocURILocked(diagURI, mapping)
+	result := ws.mapper.remapToOpenDocURI(diagURI, mapping)
 	if result != diagURI {
 		t.Errorf("remapToOpenDocURILocked() = %q; want original %q", result, diagURI)
 	}
@@ -969,7 +969,7 @@ func TestRemapToOpenDocURI_InvalidURI(t *testing.T) {
 
 	// Invalid URI should be returned unchanged
 	invalidURI := "http://not-a-file-uri"
-	result := ws.remapToOpenDocURILocked(invalidURI, mapping)
+	result := ws.mapper.remapToOpenDocURI(invalidURI, mapping)
 	if result != invalidURI {
 		t.Errorf("remapToOpenDocURILocked() = %q; want original %q", result, invalidURI)
 	}
@@ -988,7 +988,7 @@ func TestRemapToOpenDocURI_RawPathNoMatch(t *testing.T) {
 	rawPath := "/some/path/schema.yammm"
 
 	// Should convert to proper file:// URI for protocol correctness
-	result := ws.remapToOpenDocURILocked(rawPath, mapping)
+	result := ws.mapper.remapToOpenDocURI(rawPath, mapping)
 	expectedURI := "file:///some/path/schema.yammm"
 	if result != expectedURI {
 		t.Errorf("remapToOpenDocURILocked(%q) = %q; want %q", rawPath, result, expectedURI)
@@ -1009,7 +1009,7 @@ func TestRemapToOpenDocURI_RawPathWithMatch(t *testing.T) {
 	}
 
 	// Should return the mapped URI
-	result := ws.remapToOpenDocURILocked(rawPath, mapping)
+	result := ws.mapper.remapToOpenDocURI(rawPath, mapping)
 	if result != openDocURI {
 		t.Errorf("remapToOpenDocURILocked(%q) = %q; want %q", rawPath, result, openDocURI)
 	}
@@ -1031,7 +1031,7 @@ func TestRemapToOpenDocURI_NonFileURIPreserved(t *testing.T) {
 	}
 
 	for _, uri := range testCases {
-		result := ws.remapToOpenDocURILocked(uri, mapping)
+		result := ws.mapper.remapToOpenDocURI(uri, mapping)
 		if result != uri {
 			t.Errorf("remapToOpenDocURILocked(%q) = %q; want original preserved", uri, result)
 		}
@@ -1305,7 +1305,7 @@ func TestComputePublicationPlan_PerEntryIsolation(t *testing.T) {
 
 	// Verify publishedByEntry still tracks other.yammm's publication
 	ws.mu.RLock()
-	otherPublished := ws.publishedByEntry[otherURI]
+	otherPublished := ws.mapper.publishedByEntry[otherURI]
 	ws.mu.RUnlock()
 
 	if _, ok := otherPublished[otherURI]; !ok {
@@ -1353,8 +1353,8 @@ func TestComputePublicationPlan_SharedImportMultipleEntries(t *testing.T) {
 
 	// Verify both entries track shared.yammm
 	ws.mu.RLock()
-	mainPublished := ws.publishedByEntry[mainURI]
-	otherPublished := ws.publishedByEntry[otherURI]
+	mainPublished := ws.mapper.publishedByEntry[mainURI]
+	otherPublished := ws.mapper.publishedByEntry[otherURI]
 	ws.mu.RUnlock()
 
 	if _, ok := mainPublished[sharedURI]; !ok {
@@ -1386,7 +1386,7 @@ func TestComputePublicationPlan_SharedImportMultipleEntries(t *testing.T) {
 
 	// But other's tracking of shared should remain
 	ws.mu.RLock()
-	otherPublished = ws.publishedByEntry[otherURI]
+	otherPublished = ws.mapper.publishedByEntry[otherURI]
 	ws.mu.RUnlock()
 
 	if _, ok := otherPublished[sharedURI]; !ok {
@@ -1419,7 +1419,7 @@ func TestComputePublicationPlan_DocumentCloseClearsAllEntryURIs(t *testing.T) {
 
 	// Verify tracking
 	ws.mu.RLock()
-	published := ws.publishedByEntry[mainURI]
+	published := ws.mapper.publishedByEntry[mainURI]
 	ws.mu.RUnlock()
 
 	if len(published) != 2 {
@@ -1441,7 +1441,7 @@ func TestComputePublicationPlan_DocumentCloseClearsAllEntryURIs(t *testing.T) {
 
 	// Published tracking should be empty for this entry
 	ws.mu.RLock()
-	published = ws.publishedByEntry[mainURI]
+	published = ws.mapper.publishedByEntry[mainURI]
 	ws.mu.RUnlock()
 
 	if len(published) != 0 {
@@ -1491,7 +1491,7 @@ func TestWorkspace_FileChanged_SymlinkResolution(t *testing.T) {
 	// Verify reverse deps are set up
 	ws.mu.RLock()
 	canonicalPartsURI := lsputil.PathToURI(canonicalParts)
-	deps := ws.reverseDeps[canonicalPartsURI]
+	deps := ws.deps.reverseDeps[canonicalPartsURI]
 	ws.mu.RUnlock()
 
 	if _, ok := deps[mainURI]; !ok {
@@ -1520,7 +1520,7 @@ func TestWorkspace_FileChanged_SymlinkResolution(t *testing.T) {
 
 	// And the reverse deps lookup should find main
 	ws.mu.RLock()
-	depsForResolved := ws.reverseDeps[resolvedURI]
+	depsForResolved := ws.deps.reverseDeps[resolvedURI]
 	ws.mu.RUnlock()
 
 	if _, ok := depsForResolved[mainURI]; !ok {
@@ -1546,7 +1546,7 @@ func TestWorkspace_FileChanged_CanonicalPathMatching(t *testing.T) {
 	canonicalURI := lsputil.PathToURI(canonicalPath)
 
 	ws.mu.RLock()
-	deps := ws.reverseDeps[canonicalURI]
+	deps := ws.deps.reverseDeps[canonicalURI]
 	ws.mu.RUnlock()
 
 	if _, ok := deps[mainURI]; !ok {
@@ -1556,7 +1556,7 @@ func TestWorkspace_FileChanged_CanonicalPathMatching(t *testing.T) {
 	// Lookup with the same canonical URI should succeed
 	ws.mu.RLock()
 	entries := make(map[string]struct{})
-	for k := range ws.reverseDeps[canonicalURI] {
+	for k := range ws.deps.reverseDeps[canonicalURI] {
 		entries[k] = struct{}{}
 	}
 	ws.mu.RUnlock()
@@ -1585,52 +1585,52 @@ func TestScheduleAnalysis_EntryPointerIdentity(t *testing.T) {
 	uri := "file:///test.yammm"
 
 	// Create entry0 (simulating first schedule)
-	ws.debounceMu.Lock()
+	ws.sched.debounceMu.Lock()
 	entry0 := &debounceEntry{
 		timer:  time.NewTimer(1 * time.Hour),
 		cancel: func() {},
 	}
-	ws.debounces[uri] = entry0
-	ws.debounceMu.Unlock()
+	ws.sched.debounces[uri] = entry0
+	ws.sched.debounceMu.Unlock()
 
 	// Simulate: while entry0's callback is running, a new schedule happens
 	// This creates entry1 and stores it in the map
-	ws.debounceMu.Lock()
+	ws.sched.debounceMu.Lock()
 	entry1 := &debounceEntry{
 		timer:  time.NewTimer(1 * time.Hour),
 		cancel: func() {},
 	}
-	ws.debounces[uri] = entry1
-	ws.debounceMu.Unlock()
+	ws.sched.debounces[uri] = entry1
+	ws.sched.debounceMu.Unlock()
 
 	// Now simulate entry0's callback cleanup logic:
-	// It should NOT delete because ws.debounces[uri] != entry0
-	ws.debounceMu.Lock()
-	if ws.debounces[uri] == entry0 {
+	// It should NOT delete because ws.sched.debounces[uri] != entry0
+	ws.sched.debounceMu.Lock()
+	if ws.sched.debounces[uri] == entry0 {
 		// BUG: This would delete entry1 if pointer check wasn't working
-		delete(ws.debounces, uri)
+		delete(ws.sched.debounces, uri)
 	}
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Unlock()
 
 	// Verify entry1 is still in the map
-	ws.debounceMu.Lock()
-	currentEntry := ws.debounces[uri]
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Lock()
+	currentEntry := ws.sched.debounces[uri]
+	ws.sched.debounceMu.Unlock()
 
 	if currentEntry != entry1 {
 		t.Error("entry1 should still be in debounces map after entry0's cleanup attempt")
 	}
 
 	// Clean up: entry1's cleanup should succeed since it IS the current entry
-	ws.debounceMu.Lock()
-	if ws.debounces[uri] == entry1 {
-		delete(ws.debounces, uri)
+	ws.sched.debounceMu.Lock()
+	if ws.sched.debounces[uri] == entry1 {
+		delete(ws.sched.debounces, uri)
 	}
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Unlock()
 
-	ws.debounceMu.Lock()
-	_, hasEntry := ws.debounces[uri]
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Lock()
+	_, hasEntry := ws.sched.debounces[uri]
+	ws.sched.debounceMu.Unlock()
 
 	if hasEntry {
 		t.Error("entry1's cleanup should have removed the entry")
@@ -1651,9 +1651,9 @@ func TestScheduleAnalysis_RescheduleWhilePending(t *testing.T) {
 	// First schedule
 	ws.ScheduleAnalysis(nil, uri)
 
-	ws.debounceMu.Lock()
-	entry1 := ws.debounces[uri]
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Lock()
+	entry1 := ws.sched.debounces[uri]
+	ws.sched.debounceMu.Unlock()
 
 	if entry1 == nil {
 		t.Fatal("first ScheduleAnalysis should create entry")
@@ -1662,9 +1662,9 @@ func TestScheduleAnalysis_RescheduleWhilePending(t *testing.T) {
 	// Second schedule (while first timer is pending)
 	ws.ScheduleAnalysis(nil, uri)
 
-	ws.debounceMu.Lock()
-	entry2 := ws.debounces[uri]
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Lock()
+	entry2 := ws.sched.debounces[uri]
+	ws.sched.debounceMu.Unlock()
 
 	if entry2 == nil {
 		t.Fatal("second ScheduleAnalysis should create entry")
@@ -1694,49 +1694,49 @@ func TestScheduleMarkdownAnalysis_EntryPointerIdentity(t *testing.T) {
 	ws.MarkdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
 
 	// Create entry0 (simulating first schedule)
-	ws.debounceMu.Lock()
+	ws.sched.debounceMu.Lock()
 	entry0 := &debounceEntry{
 		timer:  time.NewTimer(1 * time.Hour),
 		cancel: func() {},
 	}
-	ws.debounces[uri] = entry0
-	ws.debounceMu.Unlock()
+	ws.sched.debounces[uri] = entry0
+	ws.sched.debounceMu.Unlock()
 
 	// Simulate: while entry0's callback is running, a new schedule happens
-	ws.debounceMu.Lock()
+	ws.sched.debounceMu.Lock()
 	entry1 := &debounceEntry{
 		timer:  time.NewTimer(1 * time.Hour),
 		cancel: func() {},
 	}
-	ws.debounces[uri] = entry1
-	ws.debounceMu.Unlock()
+	ws.sched.debounces[uri] = entry1
+	ws.sched.debounceMu.Unlock()
 
 	// Simulate entry0's callback cleanup: should NOT delete entry1
-	ws.debounceMu.Lock()
-	if ws.debounces[uri] == entry0 {
-		delete(ws.debounces, uri)
+	ws.sched.debounceMu.Lock()
+	if ws.sched.debounces[uri] == entry0 {
+		delete(ws.sched.debounces, uri)
 	}
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Unlock()
 
 	// Verify entry1 is still in the map
-	ws.debounceMu.Lock()
-	currentEntry := ws.debounces[uri]
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Lock()
+	currentEntry := ws.sched.debounces[uri]
+	ws.sched.debounceMu.Unlock()
 
 	if currentEntry != entry1 {
 		t.Error("entry1 should still be in debounces map after entry0's cleanup attempt")
 	}
 
 	// entry1's cleanup should succeed
-	ws.debounceMu.Lock()
-	if ws.debounces[uri] == entry1 {
-		delete(ws.debounces, uri)
+	ws.sched.debounceMu.Lock()
+	if ws.sched.debounces[uri] == entry1 {
+		delete(ws.sched.debounces, uri)
 	}
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Unlock()
 
-	ws.debounceMu.Lock()
-	_, hasEntry := ws.debounces[uri]
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Lock()
+	_, hasEntry := ws.sched.debounces[uri]
+	ws.sched.debounceMu.Unlock()
 
 	if hasEntry {
 		t.Error("entry1's cleanup should have removed the entry")
@@ -1760,9 +1760,9 @@ func TestScheduleMarkdownAnalysis_RescheduleWhilePending(t *testing.T) {
 	// First schedule
 	ws.ScheduleMarkdownAnalysis(nil, uri)
 
-	ws.debounceMu.Lock()
-	entry1 := ws.debounces[uri]
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Lock()
+	entry1 := ws.sched.debounces[uri]
+	ws.sched.debounceMu.Unlock()
 
 	if entry1 == nil {
 		t.Fatal("first ScheduleMarkdownAnalysis should create entry")
@@ -1771,9 +1771,9 @@ func TestScheduleMarkdownAnalysis_RescheduleWhilePending(t *testing.T) {
 	// Second schedule (while first timer is pending)
 	ws.ScheduleMarkdownAnalysis(nil, uri)
 
-	ws.debounceMu.Lock()
-	entry2 := ws.debounces[uri]
-	ws.debounceMu.Unlock()
+	ws.sched.debounceMu.Lock()
+	entry2 := ws.sched.debounces[uri]
+	ws.sched.debounceMu.Unlock()
 
 	if entry2 == nil {
 		t.Fatal("second ScheduleMarkdownAnalysis should create entry")

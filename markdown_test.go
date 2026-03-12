@@ -1416,19 +1416,19 @@ func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 	// Analyze with original version — the results should be discarded
 	// because the document version has changed
 	w.mu.Lock()
-	w.markdownDocs[uri].Version = 1
+	w.docs.markdownDocs[uri].Version = 1
 	w.mu.Unlock()
 
 	// Manually change back to force version mismatch after analysis
 	w.mu.Lock()
-	w.markdownDocs[uri].Version = 2
+	w.docs.markdownDocs[uri].Version = 2
 	w.mu.Unlock()
 
 	// Simulate analysis starting with v1 — since we can't easily test async
 	// version gating, we verify the snapshot structure is correct after a
 	// successful analysis
 	w.mu.Lock()
-	w.markdownDocs[uri].Version = 1
+	w.docs.markdownDocs[uri].Version = 1
 	w.mu.Unlock()
 
 	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
