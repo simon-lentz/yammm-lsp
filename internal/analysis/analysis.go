@@ -20,6 +20,9 @@ import (
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
+// diagnosticSource is the value used for the Source field in LSP diagnostics.
+const diagnosticSource = "yammm"
+
 // Snapshot represents an immutable analysis result for a single entry file.
 // It captures the complete state needed for LSP features: parsed schema,
 // diagnostics, symbol indices, and source content for position conversion.
@@ -201,7 +204,7 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 //
 // The ctx parameter supports cancellation; if cancelled, Analyze returns
 // early with a partial or nil snapshot.
-func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string, opts ...load.Option) (*Snapshot, error) {
+func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string, posEncoding lsputil.PositionEncoding, opts ...load.Option) (*Snapshot, error) {
 	a.logger.Debug("starting analysis",
 		slog.String("entry", entryPath),
 		slog.String("module_root", moduleRoot),
@@ -272,12 +275,12 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 			slog.String("error", loadErr.Error()),
 		)
 		// Return partial snapshot with diagnostics
-		snapshot.LSPDiagnostics = a.convertDiagnostics(diagResult, sourceRegistry, entryPath)
+		snapshot.LSPDiagnostics = a.convertDiagnostics(diagResult, sourceRegistry, entryPath, posEncoding)
 		return snapshot, fmt.Errorf("load schema: %w", loadErr)
 	}
 
 	// Convert diagnostics to LSP format
-	snapshot.LSPDiagnostics = a.convertDiagnostics(diagResult, sourceRegistry, entryPath)
+	snapshot.LSPDiagnostics = a.convertDiagnostics(diagResult, sourceRegistry, entryPath, posEncoding)
 
 	// Build symbol indices for navigation
 	if schemaResult != nil {
@@ -363,12 +366,7 @@ func (a *Analyzer) extractImportPaths(s *schema.Schema, seen map[string]struct{}
 
 // convertDiagnostics converts diag.Result to LSP diagnostics.
 // entryPath is used as the fallback URI for span-less diagnostics (e.g., I/O errors).
-func (a *Analyzer) convertDiagnostics(result diag.Result, sources *source.Registry, entryPath string) []URIDiagnostic {
-	renderer := diag.NewRenderer(
-		diag.WithSourceProvider(sources),
-		diag.WithLSPByteFallback(diag.LSPByteFallbackApproximate),
-	)
-
+func (a *Analyzer) convertDiagnostics(result diag.Result, sources *source.Registry, entryPath string, enc lsputil.PositionEncoding) []URIDiagnostic {
 	// Compute entry URI once for span-less diagnostics
 	entryURI := entryPath
 	if !lsputil.HasURIScheme(entryPath) {
@@ -381,60 +379,62 @@ func (a *Analyzer) convertDiagnostics(result diag.Result, sources *source.Regist
 		span := issue.Span()
 		var uri string
 		var diagRange protocol.Range
-		var severity int
-		var code, message string
 		var relatedInfo []protocol.DiagnosticRelatedInformation
 
 		if span.IsZero() {
 			// Span-less issues (e.g., file not found, I/O errors) are attached
 			// to the entry file at position 0:0 so they appear in the Problems panel.
-			// We construct a minimal diagnostic directly since LSPDiagnostic returns nil
-			// for span-less issues.
 			uri = entryURI
 			diagRange = protocol.Range{
 				Start: protocol.Position{Line: 0, Character: 0},
 				End:   protocol.Position{Line: 0, Character: 0},
 			}
-			severity = diag.SeverityToLSP(issue.Severity())
-			code = issue.Code().String()
-			message = issue.Message()
-			// No related info for span-less issues (can't convert without spans)
 		} else {
-			lspDiag := renderer.LSPDiagnostic(issue)
-			if lspDiag == nil {
-				continue
-			}
 			// Convert path to file:// URI (guard against double-encoding if already a URI)
 			sourcePath := span.Source.String()
 			uri = sourcePath
 			if !lsputil.HasURIScheme(sourcePath) {
 				uri = lsputil.PathToURI(sourcePath)
 			}
-			diagRange = protocol.Range{
-				Start: protocol.Position{
-					Line:      ToUInteger(lspDiag.Range.Start.Line),
-					Character: ToUInteger(lspDiag.Range.Start.Character),
-				},
-				End: protocol.Position{
-					Line:      ToUInteger(lspDiag.Range.End.Line),
-					Character: ToUInteger(lspDiag.Range.End.Character),
-				},
+
+			start, end, ok := lsputil.SpanToLSPRange(sources, span, enc)
+			if !ok {
+				// Fallback: use column-based approximation (1-based → 0-based)
+				diagRange = protocol.Range{
+					Start: protocol.Position{
+						Line:      ToUInteger(max(span.Start.Line-1, 0)),
+						Character: ToUInteger(max(span.Start.Column-1, 0)),
+					},
+					End: protocol.Position{
+						Line:      ToUInteger(max(span.End.Line-1, 0)),
+						Character: ToUInteger(max(span.End.Column-1, 0)),
+					},
+				}
+			} else {
+				diagRange = protocol.Range{
+					Start: protocol.Position{
+						Line:      ToUInteger(start[0]),
+						Character: ToUInteger(start[1]),
+					},
+					End: protocol.Position{
+						Line:      ToUInteger(end[0]),
+						Character: ToUInteger(end[1]),
+					},
+				}
 			}
-			severity = lspDiag.Severity
-			code = lspDiag.Code
-			message = lspDiag.Message
-			relatedInfo = a.ConvertRelatedInfo(lspDiag.RelatedInformation)
+
+			relatedInfo = a.ConvertRelatedInfo(issue.Related(), sources, enc)
 		}
 
-		source := "yammm"
+		src := diagnosticSource
 		uriDiags = append(uriDiags, URIDiagnostic{
 			URI: uri,
 			Diagnostic: protocol.Diagnostic{
 				Range:              diagRange,
-				Severity:           a.convertSeverity(severity),
-				Code:               &protocol.IntegerOrString{Value: code},
-				Source:             &source,
-				Message:            message,
+				Severity:           convertSeverity(issue.Severity()),
+				Code:               &protocol.IntegerOrString{Value: issue.Code().String()},
+				Source:             &src,
+				Message:            issue.Message(),
 				RelatedInformation: relatedInfo,
 			},
 		})
@@ -452,17 +452,17 @@ func ToUInteger(n int) protocol.UInteger {
 	return protocol.UInteger(n) //nolint:gosec // clamped to non-negative
 }
 
-// convertSeverity converts diag severity to LSP protocol severity.
-func (a *Analyzer) convertSeverity(severity int) *protocol.DiagnosticSeverity {
+// convertSeverity converts a yammm diagnostic severity to an LSP protocol severity.
+func convertSeverity(sev diag.Severity) *protocol.DiagnosticSeverity {
 	var s protocol.DiagnosticSeverity
-	switch severity {
-	case diag.LSPSeverityError:
+	switch sev {
+	case diag.Fatal, diag.Error:
 		s = protocol.DiagnosticSeverityError
-	case diag.LSPSeverityWarning:
+	case diag.Warning:
 		s = protocol.DiagnosticSeverityWarning
-	case diag.LSPSeverityInformation:
+	case diag.Info:
 		s = protocol.DiagnosticSeverityInformation
-	case diag.LSPSeverityHint:
+	case diag.Hint:
 		s = protocol.DiagnosticSeverityHint
 	default:
 		s = protocol.DiagnosticSeverityError
@@ -470,39 +470,62 @@ func (a *Analyzer) convertSeverity(severity int) *protocol.DiagnosticSeverity {
 	return &s
 }
 
-// ConvertRelatedInfo converts diag.LSPRelatedInfo to protocol.DiagnosticRelatedInformation.
-func (a *Analyzer) ConvertRelatedInfo(related []diag.LSPRelatedInfo) []protocol.DiagnosticRelatedInformation {
+// ConvertRelatedInfo converts location.RelatedInfo to LSP DiagnosticRelatedInformation.
+func (a *Analyzer) ConvertRelatedInfo(related []location.RelatedInfo, sources *source.Registry, enc lsputil.PositionEncoding) []protocol.DiagnosticRelatedInformation {
 	if len(related) == 0 {
 		return nil
 	}
 
 	result := make([]protocol.DiagnosticRelatedInformation, 0, len(related))
 	for _, rel := range related {
-		// Guard against double-encoding: if the URI already has a scheme,
-		// use it as-is. Otherwise, treat it as a filesystem path and convert
-		// to a file:// URI. This is defensive against future changes to
-		// diag.Renderer that might emit URIs directly instead of paths.
-		uri := rel.Location.URI
+		if rel.Span.IsZero() || !rel.Span.Start.IsKnown() {
+			continue
+		}
+
+		// Convert source to URI
+		uri := rel.Span.Source.String()
 		if !lsputil.HasURIScheme(uri) {
 			uri = lsputil.PathToURI(uri)
 		}
 
+		// Convert span to LSP range
+		var relRange protocol.Range
+		start, end, ok := lsputil.SpanToLSPRange(sources, rel.Span, enc)
+		if ok {
+			relRange = protocol.Range{
+				Start: protocol.Position{
+					Line:      ToUInteger(start[0]),
+					Character: ToUInteger(start[1]),
+				},
+				End: protocol.Position{
+					Line:      ToUInteger(end[0]),
+					Character: ToUInteger(end[1]),
+				},
+			}
+		} else {
+			relRange = protocol.Range{
+				Start: protocol.Position{
+					Line:      ToUInteger(max(rel.Span.Start.Line-1, 0)),
+					Character: ToUInteger(max(rel.Span.Start.Column-1, 0)),
+				},
+				End: protocol.Position{
+					Line:      ToUInteger(max(rel.Span.Start.Line-1, 0)),
+					Character: ToUInteger(max(rel.Span.Start.Column-1, 0)),
+				},
+			}
+		}
+
 		result = append(result, protocol.DiagnosticRelatedInformation{
 			Location: protocol.Location{
-				URI: uri,
-				Range: protocol.Range{
-					Start: protocol.Position{
-						Line:      ToUInteger(rel.Location.Range.Start.Line),
-						Character: ToUInteger(rel.Location.Range.Start.Character),
-					},
-					End: protocol.Position{
-						Line:      ToUInteger(rel.Location.Range.End.Line),
-						Character: ToUInteger(rel.Location.Range.End.Character),
-					},
-				},
+				URI:   uri,
+				Range: relRange,
 			},
 			Message: rel.Message,
 		})
+	}
+
+	if len(result) == 0 {
+		return nil
 	}
 	return result
 }

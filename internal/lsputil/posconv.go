@@ -10,7 +10,6 @@ import (
 
 // ByteOffsetFromLSP converts an LSP position to a byte offset.
 //
-// This is the inverse of the UTF-16 conversion in diag/lsp.go.
 // It handles:
 //   - UTF-16 encoding: character offset is in UTF-16 code units
 //   - UTF-8 encoding: character offset IS byte offset from line start
