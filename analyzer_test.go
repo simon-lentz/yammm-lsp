@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
@@ -184,7 +183,7 @@ func TestOverlayPrecedenceOverDisk(t *testing.T) {
 	analyzer := analysis.NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, diskPath, overlays, tmpDir)
+	snapshot, err := analyzer.Analyze(ctx, diskPath, overlays, tmpDir, PositionEncodingUTF16)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
 	}
@@ -266,7 +265,7 @@ func TestOverlayWithSymlinkPath_StillOverridesDisk(t *testing.T) {
 
 	ctx := t.Context()
 	// Use symlink path as entry too (matches how workspace would call this)
-	snapshot, err := analyzer.Analyze(ctx, symlinkPath, overlays, linkDir)
+	snapshot, err := analyzer.Analyze(ctx, symlinkPath, overlays, linkDir, PositionEncodingUTF16)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
 	}
@@ -327,7 +326,7 @@ func TestLoadSources_PopulatesSourceRegistry(t *testing.T) {
 	analyzer := analysis.NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir)
+	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir, PositionEncodingUTF16)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
 	}
@@ -405,7 +404,7 @@ func TestLoadSources_DiskFallback(t *testing.T) {
 	analyzer := analysis.NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir)
+	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir, PositionEncodingUTF16)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
 	}
@@ -554,7 +553,7 @@ type TypeB {
 	ctx := t.Context()
 
 	// Analyze requesting b_main.yammm as entry (even though a_types is lexicographically first)
-	snapshot, err := analyzer.Analyze(ctx, bPath, overlays, tmpDir)
+	snapshot, err := analyzer.Analyze(ctx, bPath, overlays, tmpDir, PositionEncodingUTF16)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
 	}
@@ -582,38 +581,30 @@ type TypeB {
 func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 	// Tests that paths with spaces in RelatedInformation are properly
 	// percent-encoded when converted to file:// URIs.
-	//
-	// This is a regression test for the issue where diag.Renderer
-	// produced URIs with unencoded spaces (invalid per RFC 3986).
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	analyzer := analysis.NewAnalyzer(logger)
 
 	tests := []struct {
-		name     string
-		inputURI string
-		wantURI  string
+		name    string
+		path    string
+		wantURI string
 	}{
 		{
-			name:     "path with spaces",
-			inputURI: "/path/with spaces/file.yammm",
-			wantURI:  "file:///path/with%20spaces/file.yammm",
+			name:    "path with spaces",
+			path:    "/path/with spaces/file.yammm",
+			wantURI: "file:///path/with%20spaces/file.yammm",
 		},
 		{
-			name:     "path with multiple spaces",
-			inputURI: "/my projects/my file.yammm",
-			wantURI:  "file:///my%20projects/my%20file.yammm",
+			name:    "path with multiple spaces",
+			path:    "/my projects/my file.yammm",
+			wantURI: "file:///my%20projects/my%20file.yammm",
 		},
 		{
-			name:     "path without spaces",
-			inputURI: "/normal/path/file.yammm",
-			wantURI:  "file:///normal/path/file.yammm",
-		},
-		{
-			name:     "already encoded URI",
-			inputURI: "file:///already%20encoded/file.yammm",
-			wantURI:  "file:///already%20encoded/file.yammm",
+			name:    "path without spaces",
+			path:    "/normal/path/file.yammm",
+			wantURI: "file:///normal/path/file.yammm",
 		},
 	}
 
@@ -621,21 +612,19 @@ func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Create related info with the test URI
-			related := []diag.LSPRelatedInfo{
+			sourceID, err := location.SourceIDFromAbsolutePath(tt.path)
+			if err != nil {
+				t.Skipf("skipping: %v", err)
+			}
+
+			related := []location.RelatedInfo{
 				{
-					Location: diag.LSPLocation{
-						URI: tt.inputURI,
-						Range: diag.LSPRange{
-							Start: diag.LSPPosition{Line: 5, Character: 0},
-							End:   diag.LSPPosition{Line: 5, Character: 10},
-						},
-					},
+					Span:    location.Point(sourceID, 6, 1),
 					Message: "related info message",
 				},
 			}
 
-			result := analyzer.ConvertRelatedInfo(related)
+			result := analyzer.ConvertRelatedInfo(related, nil, PositionEncodingUTF16)
 
 			if len(result) != 1 {
 				t.Fatalf("expected 1 related info, got %d", len(result))

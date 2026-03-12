@@ -575,7 +575,7 @@ func (w *Workspace) AnalyzeAndPublish(notify Notifier, analyzeCtx context.Contex
 
 	// Perform analysis with cancellable context.
 	// Use canonical path to ensure consistent SourceID creation.
-	snapshot, err := w.analyzer.Analyze(analyzeCtx, canonicalPath, overlays, moduleRoot)
+	snapshot, err := w.analyzer.Analyze(analyzeCtx, canonicalPath, overlays, moduleRoot, w.PositionEncoding())
 
 	// Check if context was cancelled - abort silently
 	if analyzeCtx.Err() != nil {
@@ -1304,7 +1304,7 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(notify Notifier, analyzeCtx contex
 		overlays := map[string][]byte{
 			virtualPath: []byte(block.Content),
 		}
-		snapshot, err := w.analyzer.Analyze(analyzeCtx, virtualPath, overlays, "", load.WithDisallowImports())
+		snapshot, err := w.analyzer.Analyze(analyzeCtx, virtualPath, overlays, "", w.PositionEncoding(), load.WithDisallowImports())
 		if err != nil {
 			w.logger.Warn("markdown block analysis failed",
 				slog.String("uri", uri), slog.Int("block", i), slog.String("error", err.Error()))

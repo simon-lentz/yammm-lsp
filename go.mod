@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/antlr4-go/antlr/v4 v4.13.1
-	github.com/simon-lentz/yammm v0.1.3
+	github.com/simon-lentz/yammm v0.1.4
 	github.com/stretchr/testify v1.11.1
 	github.com/tliron/commonlog v0.2.21
 	github.com/tliron/glsp v0.2.2
