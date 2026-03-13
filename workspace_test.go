@@ -1502,9 +1502,7 @@ func TestWorkspace_FileChanged_SymlinkResolution(t *testing.T) {
 	linkedParts := linkedDir + "/parts.yammm"
 	linkedPartsURI := lsputil.PathToURI(linkedParts)
 
-	// Track if ScheduleAnalysis is called
-	// We can't easily test the actual scheduling without a glsp.Context,
-	// but we can verify the path resolution works by checking the deps lookup
+	// Verify the path resolution works by checking the deps lookup
 
 	// Manually test the canonicalization logic that FileChanged uses
 	path, _ := lsputil.URIToPath(linkedPartsURI)

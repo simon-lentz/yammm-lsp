@@ -236,6 +236,10 @@ func (s *Server) shutdown(_ context.Context) (any, error) {
 
 // exit handles the exit notification per LSP spec.
 // Exit code is 0 if shutdown was called first, 1 otherwise.
+//
+// os.Exit is intentional: the LSP spec requires the process to terminate on
+// the exit notification. This bypasses deferred cleanup in main.run(), but
+// the JSON logger does not buffer, so no output is lost.
 func (s *Server) exit(_ context.Context) error {
 	exitCode := 0
 	if !s.shutdownCalled {

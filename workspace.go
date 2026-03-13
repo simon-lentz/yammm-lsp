@@ -70,9 +70,9 @@ type document struct {
 	lineState *lineState
 }
 
-// documentSnapshot is an immutable view of a document at a point in time.
-// Use this when you need to access document state outside of locks to avoid
-// data races with concurrent DocumentChanged calls.
+// documentSnapshot is a point-in-time view of a document's state.
+// Treat as immutable after creation — fields are value types or pointers
+// for efficiency, but callers must not modify the underlying data.
 type documentSnapshot struct {
 	URI       string
 	SourceID  location.SourceID
