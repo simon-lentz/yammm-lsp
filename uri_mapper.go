@@ -23,7 +23,7 @@ type uriMapper struct {
 	//   - findModuleRoot operates on OS-native paths separately (uses filepath.Separator)
 	//
 	// Nil when invalidated; lazily rebuilt on first access after mutation.
-	// Invalidated by DocumentOpened/DocumentClosed.
+	// Invalidated by documentOpened/documentClosed.
 	canonicalToURI map[string]string
 
 	// Previously published diagnostics URIs, keyed by entry URI.
@@ -220,7 +220,7 @@ func (m *uriMapper) computePublicationPlan(entryURI string, snapshot *analysis.S
 }
 
 // clearEntryPublications removes and returns the set of URIs published by the
-// given entry. Used during DocumentClosed to determine what diagnostics to clear.
+// given entry. Used during documentClosed to determine what diagnostics to clear.
 //
 // Must be called with Workspace.mu held.
 func (m *uriMapper) clearEntryPublications(entryURI string) map[string]struct{} {
@@ -230,7 +230,7 @@ func (m *uriMapper) clearEntryPublications(entryURI string) map[string]struct{} 
 }
 
 // uriStillPublishedByOthers checks if any other entry still publishes diagnostics
-// to the given URI. Used during DocumentClosed to avoid clearing diagnostics that
+// to the given URI. Used during documentClosed to avoid clearing diagnostics that
 // are still relevant from another entry's analysis.
 //
 // Must be called with Workspace.mu held.

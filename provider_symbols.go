@@ -21,49 +21,26 @@ func (s *Server) textDocumentDocumentSymbol(_ context.Context, params *protocol.
 
 	s.logger.Debug("documentSymbol request", "uri", uri)
 
-	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
-		return s.markdownDocumentSymbols(mdSnap), nil
-	}
-
-	snapshot := s.workspace.LatestSnapshot(uri)
-	if snapshot == nil {
+	units := s.resolveAllUnits(uri)
+	if units == nil {
 		return nil, nil
 	}
 
-	doc := s.workspace.GetDocumentSnapshot(uri)
-	if doc == nil {
-		return nil, nil
-	}
-
-	symbols := s.documentSymbolsFor(snapshot, doc)
-	return symbols, nil
-}
-
-// markdownDocumentSymbols returns document symbols from all code blocks in a markdown file.
-// Unlike cursor-centric handlers, this iterates all blocks and aggregates symbols.
-func (s *Server) markdownDocumentSymbols(mdSnap *markdownDocumentSnapshot) []protocol.DocumentSymbol {
 	var allSymbols []protocol.DocumentSymbol
-
-	for i, snapshot := range mdSnap.Snapshots {
-		if snapshot == nil || i >= len(mdSnap.Blocks) {
-			continue
+	for _, unit := range units {
+		syms := s.documentSymbolsFor(unit.Snapshot, unit.Doc)
+		if len(syms) > 0 && unit.Remap != nil {
+			syms = remapDocumentSymbolRanges(syms, unit.Remap)
 		}
-
-		blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[i])
-		symbols := s.documentSymbolsFor(snapshot, blockDocSnap)
-		if len(symbols) > 0 {
-			remapped := remapDocumentSymbolRanges(symbols, mdSnap, i)
-			allSymbols = append(allSymbols, remapped...)
-		}
+		allSymbols = append(allSymbols, syms...)
 	}
-
-	return allSymbols
+	return allSymbols, nil
 }
 
 // remapDocumentSymbolRanges remaps Range and SelectionRange of document symbols
 // from block-local coordinates to markdown coordinates. Recursively processes Children.
 // Returns nil for empty input. Creates copies to avoid mutating the originals.
-func remapDocumentSymbolRanges(symbols []protocol.DocumentSymbol, mdSnap *markdownDocumentSnapshot, blockIndex int) []protocol.DocumentSymbol {
+func remapDocumentSymbolRanges(symbols []protocol.DocumentSymbol, remap *blockRemap) []protocol.DocumentSymbol {
 	if len(symbols) == 0 {
 		return nil
 	}
@@ -71,30 +48,12 @@ func remapDocumentSymbolRanges(symbols []protocol.DocumentSymbol, mdSnap *markdo
 	result := make([]protocol.DocumentSymbol, len(symbols))
 	for i, sym := range symbols {
 		result[i] = sym
-
-		// Remap Range
-		startLine, startChar := mdSnap.BlockPositionToMarkdown(blockIndex,
-			int(sym.Range.Start.Line), int(sym.Range.Start.Character))
-		endLine, endChar := mdSnap.BlockPositionToMarkdown(blockIndex,
-			int(sym.Range.End.Line), int(sym.Range.End.Character))
-		result[i].Range = protocol.Range{
-			Start: protocol.Position{Line: analysis.ToUInteger(startLine), Character: analysis.ToUInteger(startChar)},
-			End:   protocol.Position{Line: analysis.ToUInteger(endLine), Character: analysis.ToUInteger(endChar)},
-		}
-
-		// Remap SelectionRange
-		selStartLine, selStartChar := mdSnap.BlockPositionToMarkdown(blockIndex,
-			int(sym.SelectionRange.Start.Line), int(sym.SelectionRange.Start.Character))
-		selEndLine, selEndChar := mdSnap.BlockPositionToMarkdown(blockIndex,
-			int(sym.SelectionRange.End.Line), int(sym.SelectionRange.End.Character))
-		result[i].SelectionRange = protocol.Range{
-			Start: protocol.Position{Line: analysis.ToUInteger(selStartLine), Character: analysis.ToUInteger(selStartChar)},
-			End:   protocol.Position{Line: analysis.ToUInteger(selEndLine), Character: analysis.ToUInteger(selEndChar)},
-		}
+		result[i].Range = remap.RemapRange(sym.Range)
+		result[i].SelectionRange = remap.RemapRange(sym.SelectionRange)
 
 		// Recursively remap children
 		if len(sym.Children) > 0 {
-			result[i].Children = remapDocumentSymbolRanges(sym.Children, mdSnap, blockIndex)
+			result[i].Children = remapDocumentSymbolRanges(sym.Children, remap)
 		}
 	}
 

@@ -29,72 +29,30 @@ func (s *Server) textDocumentDefinition(_ context.Context, params *protocol.Defi
 		"character", params.Position.Character,
 	)
 
-	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
-		return s.markdownDefinition(params, mdSnap)
-	}
-
-	snapshot := s.workspace.LatestSnapshot(uri)
-	if snapshot == nil {
-		s.logger.Debug("no snapshot for definition", "uri", uri)
+	unit := s.resolveUnit(uri, int(params.Position.Line), int(params.Position.Character), true)
+	if unit == nil {
 		return nil, nil
 	}
 
-	doc := s.workspace.GetDocumentSnapshot(uri)
-	if doc == nil {
-		s.logger.Debug("document not open for definition", "uri", uri)
-		return nil, nil
-	}
-
-	return s.definitionAtPosition(snapshot, doc,
-		int(params.Position.Line), int(params.Position.Character))
-}
-
-// markdownDefinition handles definition requests within yammm code blocks in markdown files.
-//
-//nolint:nilnil // LSP protocol: nil result means "no definition found"
-func (s *Server) markdownDefinition(params *protocol.DefinitionParams, mdSnap *markdownDocumentSnapshot) (any, error) {
-	blockPos := mdSnap.MarkdownPositionToBlock(int(params.Position.Line), int(params.Position.Character))
-	if blockPos == nil {
-		return nil, nil
-	}
-
-	if blockPos.BlockIndex >= len(mdSnap.Snapshots) || blockPos.BlockIndex >= len(mdSnap.Blocks) ||
-		mdSnap.Snapshots[blockPos.BlockIndex] == nil {
-		return nil, nil
-	}
-	snapshot := mdSnap.Snapshots[blockPos.BlockIndex]
-	block := mdSnap.Blocks[blockPos.BlockIndex]
-
-	blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, block)
-
-	result, err := s.definitionAtPosition(snapshot, blockDocSnap, blockPos.LocalLine, blockPos.LocalChar)
+	result, err := s.definitionAtPosition(unit.Snapshot, unit.Doc, unit.LocalLine, unit.LocalChar)
 	if err != nil || result == nil {
 		return result, err
 	}
 
-	// Remap the location URI and range if it points to the virtual block SourceID
-	loc, ok := result.(*protocol.Location)
-	if !ok || loc == nil {
-		return result, nil
-	}
-
-	// Decode the location URI to check if it matches our virtual block path.
-	// symbolToLocation calls RemapPathToURI which percent-encodes '#' in virtual
-	// paths (e.g., /path/to/README.md%23block-0). URIToPath reverses this.
-	locPath, pathErr := lsputil.URIToPath(loc.URI)
-	if pathErr == nil && filepath.ToSlash(locPath) == block.SourceID.String() {
-		loc.URI = mdSnap.URI
-		startLine, startChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
-			int(loc.Range.Start.Line), int(loc.Range.Start.Character))
-		endLine, endChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
-			int(loc.Range.End.Line), int(loc.Range.End.Character))
-		loc.Range = protocol.Range{
-			Start: protocol.Position{Line: analysis.ToUInteger(startLine), Character: analysis.ToUInteger(startChar)},
-			End:   protocol.Position{Line: analysis.ToUInteger(endLine), Character: analysis.ToUInteger(endChar)},
+	if unit.Remap != nil {
+		if loc, ok := result.(*protocol.Location); ok && loc != nil {
+			// Remap the location URI and range if it points to the virtual block SourceID.
+			// symbolToLocation calls RemapPathToURI which percent-encodes '#' in virtual
+			// paths (e.g., /path/to/README.md%23block-0). URIToPath reverses this.
+			block := unit.Remap.mdSnap.Blocks[unit.Remap.blockIndex]
+			locPath, pathErr := lsputil.URIToPath(loc.URI)
+			if pathErr == nil && filepath.ToSlash(locPath) == block.SourceID.String() {
+				loc.URI = unit.Remap.mdSnap.URI
+				loc.Range = unit.Remap.RemapRange(loc.Range)
+			}
 		}
 	}
-
-	return loc, nil
+	return result, nil
 }
 
 // definitionAtPosition returns the definition location for the symbol at the given position.

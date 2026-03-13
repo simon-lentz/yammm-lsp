@@ -2,6 +2,8 @@ package lsp
 
 import (
 	"context"
+	"encoding/json"
+	"hash/fnv"
 	"log/slog"
 	"path/filepath"
 	"slices"
@@ -141,6 +143,11 @@ type Workspace struct {
 
 	// mapper manages canonical path mapping and per-entry publication tracking.
 	mapper uriMapper
+
+	// diagHashMu protects diagHashes. Separate from mu because publishDiagnostics
+	// is called outside the workspace lock (to avoid deadlock on I/O).
+	diagHashMu sync.Mutex
+	diagHashes map[string]uint64 // URI → FNV hash of last published diagnostics
 }
 
 // NewWorkspace creates a new workspace.
@@ -169,6 +176,7 @@ func NewWorkspace(logger *slog.Logger, cfg Config) *Workspace {
 		roots:       make([]string, 0),
 		snapshots:   make(map[string]*analysis.Snapshot),
 		posEncoding: PositionEncodingUTF16,
+		diagHashes:  make(map[string]uint64),
 		docs: docOverlay{
 			open:         make(map[string]*document),
 			markdownDocs: make(map[string]*markdownDocument),
@@ -189,10 +197,109 @@ func NewWorkspace(logger *slog.Logger, cfg Config) *Workspace {
 	}
 }
 
-// BackgroundContext returns the workspace's background context for analysis.
-// This context is cancelled during Shutdown.
-func (w *Workspace) BackgroundContext() context.Context {
-	return w.sched.backgroundContext()
+// OpenDocument stores document state and triggers immediate analysis.
+// Routes to yammm or markdown handling based on URI extension.
+// Unsupported file types are silently ignored (debug logged).
+func (w *Workspace) OpenDocument(notify notifyFunc, uri string, version int, text string) {
+	switch {
+	case lsputil.IsYammmURI(uri):
+		w.documentOpened(uri, version, text)
+		w.analyzeAndPublish(notify, w.sched.backgroundContext(), uri)
+	case lsputil.IsMarkdownURI(uri):
+		w.markdownDocumentOpened(uri, version, text)
+		w.analyzeMarkdownAndPublish(notify, w.sched.backgroundContext(), uri)
+	default:
+		w.logger.Debug("ignoring open for unsupported file type", slog.String("uri", uri))
+	}
+}
+
+// ChangeDocument updates document text and schedules debounced analysis.
+// Handles both full-sync and incremental-change fallback internally.
+func (w *Workspace) ChangeDocument(notify notifyFunc, uri string, version int, changes []any) {
+	text, ok := extractFullSyncText(changes)
+	if !ok {
+		text, ok = w.mergeIncrementalFallback(uri, changes)
+		if !ok {
+			return
+		}
+	}
+
+	switch {
+	case lsputil.IsYammmURI(uri):
+		w.documentChanged(uri, version, text)
+		w.scheduleAnalysis(notify, uri)
+	case lsputil.IsMarkdownURI(uri):
+		w.markdownDocumentChanged(uri, version, text)
+		w.scheduleMarkdownAnalysis(notify, uri)
+	default:
+		w.logger.Debug("ignoring change for unsupported file type", slog.String("uri", uri))
+	}
+}
+
+// CloseDocument cleans up document state and clears diagnostics.
+func (w *Workspace) CloseDocument(notify notifyFunc, uri string) {
+	switch {
+	case lsputil.IsYammmURI(uri):
+		w.documentClosed(notify, uri)
+	case lsputil.IsMarkdownURI(uri):
+		w.markdownDocumentClosed(notify, uri)
+	default:
+		w.logger.Debug("ignoring close for unsupported file type", slog.String("uri", uri))
+	}
+}
+
+// extractFullSyncText returns the text of the last full-sync change, if any.
+func extractFullSyncText(changes []any) (string, bool) {
+	if len(changes) == 0 {
+		return "", false
+	}
+	var lastFullChange *protocol.TextDocumentContentChangeEventWhole
+	for _, rawChange := range changes {
+		if change, ok := rawChange.(protocol.TextDocumentContentChangeEventWhole); ok {
+			lastFullChange = &change
+		}
+	}
+	if lastFullChange != nil {
+		return lastFullChange.Text, true
+	}
+	return "", false
+}
+
+// mergeIncrementalFallback handles incremental changes by merging them into the
+// current document text. Returns the merged text and true if successful.
+func (w *Workspace) mergeIncrementalFallback(uri string, changes []any) (string, bool) {
+	if len(changes) == 0 {
+		return "", false
+	}
+	// Verify first change is an incremental change
+	if _, ok := changes[0].(protocol.TextDocumentContentChangeEvent); !ok {
+		return "", false
+	}
+
+	w.logger.Warn("received incremental change but server advertises full sync",
+		slog.String("uri", uri))
+
+	// Get current text from the appropriate document store
+	var currentText string
+	var found bool
+	switch {
+	case lsputil.IsYammmURI(uri):
+		doc := w.GetDocumentSnapshot(uri)
+		if doc == nil {
+			w.logger.Warn("incremental change for unknown document", slog.String("uri", uri))
+			return "", false
+		}
+		currentText = doc.Text
+		found = true
+	case lsputil.IsMarkdownURI(uri):
+		currentText, found = w.getMarkdownCurrentText(uri)
+	}
+	if !found {
+		return "", false
+	}
+
+	merged := mergeIncrementalChanges(currentText, w.PositionEncoding(), changes, w.logger)
+	return merged, true
 }
 
 // AddRoot adds a workspace root.
@@ -209,7 +316,7 @@ func (w *Workspace) AddRoot(uri string) {
 		return
 	}
 
-	// Resolve symlinks to get canonical path matching DocumentOpened behavior.
+	// Resolve symlinks to get canonical path matching documentOpened behavior.
 	// This ensures roots and open documents live in the same namespace,
 	// making findModuleRoot reliable under symlinks (e.g., /var → /private/var on macOS).
 	canonicalPath := path
@@ -280,8 +387,8 @@ func (w *Workspace) PositionEncoding() PositionEncoding {
 	return w.posEncoding
 }
 
-// DocumentOpened handles a document being opened.
-func (w *Workspace) DocumentOpened(uri string, version int, text string) {
+// documentOpened handles a document being opened.
+func (w *Workspace) documentOpened(uri string, version int, text string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -291,19 +398,19 @@ func (w *Workspace) DocumentOpened(uri string, version int, text string) {
 	w.mapper.invalidateCache()
 }
 
-// DocumentChanged handles a document content change.
+// documentChanged handles a document content change.
 // Ignores stale updates where version <= current version (unless version is 0/unknown).
-func (w *Workspace) DocumentChanged(uri string, version int, text string) {
+func (w *Workspace) documentChanged(uri string, version int, text string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	w.docs.changeDocument(uri, version, text, w.logger)
 }
 
-// DocumentClosed handles a document being closed.
+// documentClosed handles a document being closed.
 // notify is the notification function for clearing diagnostics; if nil,
 // diagnostics are not cleared (useful in tests).
-func (w *Workspace) DocumentClosed(notify notifyFunc, uri string) {
+func (w *Workspace) documentClosed(notify notifyFunc, uri string) {
 	w.mu.Lock()
 	w.docs.removeDocument(uri)
 	delete(w.snapshots, uri)
@@ -329,6 +436,7 @@ func (w *Workspace) DocumentClosed(notify notifyFunc, uri string) {
 	// Clear diagnostics for URIs only published by this entry (no lock — may block on I/O)
 	for _, pubURI := range urisToClear {
 		w.publishDiagnostics(notify, pubURI, nil, nil)
+		w.clearDiagHash(pubURI)
 	}
 
 	// Cancel any pending analysis (acquires debounceMu — safe, mu not held)
@@ -344,20 +452,20 @@ func (w *Workspace) ReanalyzeOpenDocuments(notify notifyFunc) {
 	w.mu.RUnlock()
 
 	for _, uri := range uris {
-		w.ScheduleAnalysis(notify, uri)
+		w.scheduleAnalysis(notify, uri)
 	}
 }
 
-// ScheduleAnalysis schedules a debounced analysis for the given document.
-func (w *Workspace) ScheduleAnalysis(notify notifyFunc, uri string) {
-	w.sched.schedule(notify, uri, w.AnalyzeAndPublish)
+// scheduleAnalysis schedules a debounced analysis for the given document.
+func (w *Workspace) scheduleAnalysis(notify notifyFunc, uri string) {
+	w.sched.schedule(notify, uri, w.analyzeAndPublish)
 }
 
-// AnalyzeAndPublish analyzes a document and publishes diagnostics.
+// analyzeAndPublish analyzes a document and publishes diagnostics.
 // analyzeCtx is a cancellable context; if cancelled, analysis aborts early.
 // notify is the notification function for publishing diagnostics; if nil,
 // diagnostics are computed but not published (useful in tests).
-func (w *Workspace) AnalyzeAndPublish(notify notifyFunc, analyzeCtx context.Context, uri string) {
+func (w *Workspace) analyzeAndPublish(notify notifyFunc, analyzeCtx context.Context, uri string) {
 	w.mu.RLock()
 	doc, ok := w.docs.open[uri]
 	if !ok {
@@ -468,23 +576,12 @@ func (w *Workspace) publishSnapshotDiagnostics(notify notifyFunc, entryURI strin
 	// Phase 1: Compute publication plan under lock
 	diagsByURI, staleURIs, versionsByURI := w.computePublicationPlan(entryURI, snapshot)
 
-	// Phase 2: Emit notifications outside the lock
-	// Clear stale diagnostics
+	// Phase 2: Emit notifications outside the lock (via publishDiagnostics for hash dedup)
 	for _, uri := range staleURIs {
-		notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
-			URI:         uri,
-			Version:     versionsByURI[uri],
-			Diagnostics: []protocol.Diagnostic{},
-		})
+		w.publishDiagnostics(notify, uri, versionsByURI[uri], nil)
 	}
-
-	// Publish current diagnostics
 	for uri, diags := range diagsByURI {
-		notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
-			URI:         uri,
-			Version:     versionsByURI[uri],
-			Diagnostics: diags,
-		})
+		w.publishDiagnostics(notify, uri, versionsByURI[uri], diags)
 	}
 }
 
@@ -514,11 +611,42 @@ func (w *Workspace) publishDiagnostics(notify notifyFunc, uri string, version *p
 		diagnostics = []protocol.Diagnostic{}
 	}
 
+	// Hash-based deduplication: skip notification if diagnostics haven't changed.
+	if hash, ok := hashDiagnostics(diagnostics); ok {
+		w.diagHashMu.Lock()
+		if prev, exists := w.diagHashes[uri]; exists && prev == hash {
+			w.diagHashMu.Unlock()
+			return
+		}
+		w.diagHashes[uri] = hash
+		w.diagHashMu.Unlock()
+	}
+
 	notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 		URI:         uri,
 		Version:     version,
 		Diagnostics: diagnostics,
 	})
+}
+
+// clearDiagHash removes the diagnostic hash entry for a URI.
+// Called when documents are closed to ensure fresh diagnostics on re-open.
+func (w *Workspace) clearDiagHash(uri string) {
+	w.diagHashMu.Lock()
+	delete(w.diagHashes, uri)
+	w.diagHashMu.Unlock()
+}
+
+// hashDiagnostics computes a FNV-1a hash of a diagnostics slice for deduplication.
+// Returns false if marshaling fails (caller should publish unconditionally).
+func hashDiagnostics(diags []protocol.Diagnostic) (uint64, bool) {
+	data, err := json.Marshal(diags)
+	if err != nil {
+		return 0, false
+	}
+	h := fnv.New64a()
+	_, _ = h.Write(data)
+	return h.Sum64(), true
 }
 
 // FileChanged handles a watched file change notification.
@@ -550,7 +678,7 @@ func (w *Workspace) FileChanged(notify notifyFunc, uri string, changeType protoc
 	w.mu.RUnlock()
 
 	for entryURI := range deps {
-		w.ScheduleAnalysis(notify, entryURI)
+		w.scheduleAnalysis(notify, entryURI)
 	}
 }
 
@@ -619,7 +747,7 @@ func (w *Workspace) LatestSnapshot(uri string) *analysis.Snapshot {
 
 // GetDocumentSnapshot returns an immutable snapshot of the document for a URI.
 // The snapshot contains a copy of the document state at the time of the call,
-// allowing safe access outside of locks without racing with DocumentChanged.
+// allowing safe access outside of locks without racing with documentChanged.
 func (w *Workspace) GetDocumentSnapshot(uri string) *documentSnapshot {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -636,25 +764,25 @@ func (w *Workspace) RemapPathToURI(input string) string {
 	return w.mapper.remapPathToURI(input, w.docs.open)
 }
 
-// MarkdownDocumentOpened creates a markdownDocument with normalized text and version.
-// Block extraction is deferred to AnalyzeMarkdownAndPublish.
-func (w *Workspace) MarkdownDocumentOpened(uri string, version int, text string) {
+// markdownDocumentOpened creates a markdownDocument with normalized text and version.
+// Block extraction is deferred to analyzeMarkdownAndPublish.
+func (w *Workspace) markdownDocumentOpened(uri string, version int, text string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.docs.openMarkdownDocument(uri, version, text)
 }
 
-// MarkdownDocumentChanged updates text and version for a markdown document.
+// markdownDocumentChanged updates text and version for a markdown document.
 // Ignores stale updates (version <= current unless either is 0).
-// Does NOT re-extract blocks — that is done atomically by AnalyzeMarkdownAndPublish.
-func (w *Workspace) MarkdownDocumentChanged(uri string, version int, text string) {
+// Does NOT re-extract blocks — that is done atomically by analyzeMarkdownAndPublish.
+func (w *Workspace) markdownDocumentChanged(uri string, version int, text string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.docs.changeMarkdownDocument(uri, version, text, w.logger)
 }
 
-// MarkdownDocumentClosed removes a markdown document and clears its diagnostics.
-func (w *Workspace) MarkdownDocumentClosed(notify notifyFunc, uri string) {
+// markdownDocumentClosed removes a markdown document and clears its diagnostics.
+func (w *Workspace) markdownDocumentClosed(notify notifyFunc, uri string) {
 	w.mu.Lock()
 	w.docs.removeMarkdownDocument(uri)
 
@@ -665,6 +793,7 @@ func (w *Workspace) MarkdownDocumentClosed(notify notifyFunc, uri string) {
 	if hadPublished {
 		w.publishDiagnostics(notify, uri, nil, nil)
 	}
+	w.clearDiagHash(uri)
 
 	w.cancelPendingAnalysis(uri)
 }
@@ -676,20 +805,20 @@ func (w *Workspace) GetMarkdownDocumentSnapshot(uri string) *markdownDocumentSna
 	return w.docs.getMarkdownSnapshot(uri)
 }
 
-// GetMarkdownCurrentText returns the current text of a markdown document.
-func (w *Workspace) GetMarkdownCurrentText(uri string) (string, bool) {
+// getMarkdownCurrentText returns the current text of a markdown document.
+func (w *Workspace) getMarkdownCurrentText(uri string) (string, bool) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.docs.getMarkdownCurrentText(uri)
 }
 
-// ScheduleMarkdownAnalysis schedules a debounced analysis for a markdown document.
-func (w *Workspace) ScheduleMarkdownAnalysis(notify notifyFunc, uri string) {
-	w.sched.schedule(notify, uri, w.AnalyzeMarkdownAndPublish)
+// scheduleMarkdownAnalysis schedules a debounced analysis for a markdown document.
+func (w *Workspace) scheduleMarkdownAnalysis(notify notifyFunc, uri string) {
+	w.sched.schedule(notify, uri, w.analyzeMarkdownAndPublish)
 }
 
-// AnalyzeMarkdownAndPublish analyzes a markdown document's code blocks and publishes diagnostics.
-func (w *Workspace) AnalyzeMarkdownAndPublish(notify notifyFunc, analyzeCtx context.Context, uri string) {
+// analyzeMarkdownAndPublish analyzes a markdown document's code blocks and publishes diagnostics.
+func (w *Workspace) analyzeMarkdownAndPublish(notify notifyFunc, analyzeCtx context.Context, uri string) {
 	// Read text and version under lock
 	w.mu.RLock()
 	md := w.docs.markdownDocs[uri]
@@ -874,13 +1003,6 @@ func (w *Workspace) publishMarkdownDiagnostics(notify notifyFunc, snap *markdown
 	w.mapper.publishedByEntry[snap.URI] = map[string]struct{}{snap.URI: {}}
 	w.mu.Unlock()
 
-	if allDiagnostics == nil {
-		allDiagnostics = []protocol.Diagnostic{}
-	}
 	v := protocol.Integer(snap.Version) //nolint:gosec // LSP version fits int32
-	notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
-		URI:         snap.URI,
-		Version:     &v,
-		Diagnostics: allDiagnostics,
-	})
+	w.publishDiagnostics(notify, snap.URI, &v, allDiagnostics)
 }

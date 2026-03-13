@@ -11,7 +11,7 @@ import (
 // GetMarkdownDocumentSnapshot) for safe concurrent reads.
 //
 // ATOMICITY INVARIANT: Blocks and Snapshots must only be replaced together,
-// atomically under the workspace lock, by AnalyzeMarkdownAndPublish.
+// atomically under the workspace lock, by analyzeMarkdownAndPublish.
 type markdownDocument struct {
 	URI       string
 	Version   int

@@ -30,58 +30,19 @@ func (s *Server) textDocumentHover(_ context.Context, params *protocol.HoverPara
 		"character", params.Position.Character,
 	)
 
-	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
-		return s.markdownHover(params, mdSnap)
-	}
-
-	snapshot := s.workspace.LatestSnapshot(uri)
-	if snapshot == nil {
+	unit := s.resolveUnit(uri, int(params.Position.Line), int(params.Position.Character), true)
+	if unit == nil {
 		return nil, nil
 	}
 
-	doc := s.workspace.GetDocumentSnapshot(uri)
-	if doc == nil {
-		return nil, nil
-	}
-
-	return s.hoverAtPosition(snapshot, doc,
-		int(params.Position.Line), int(params.Position.Character))
-}
-
-// markdownHover handles hover requests within yammm code blocks in markdown files.
-//
-//nolint:nilnil // LSP protocol: nil result means "no hover info"
-func (s *Server) markdownHover(params *protocol.HoverParams, mdSnap *markdownDocumentSnapshot) (*protocol.Hover, error) {
-	blockPos := mdSnap.MarkdownPositionToBlock(int(params.Position.Line), int(params.Position.Character))
-	if blockPos == nil {
-		return nil, nil
-	}
-
-	if blockPos.BlockIndex >= len(mdSnap.Snapshots) || blockPos.BlockIndex >= len(mdSnap.Blocks) ||
-		mdSnap.Snapshots[blockPos.BlockIndex] == nil {
-		return nil, nil
-	}
-	snapshot := mdSnap.Snapshots[blockPos.BlockIndex]
-
-	blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[blockPos.BlockIndex])
-
-	result, err := s.hoverAtPosition(snapshot, blockDocSnap, blockPos.LocalLine, blockPos.LocalChar)
+	result, err := s.hoverAtPosition(unit.Snapshot, unit.Doc, unit.LocalLine, unit.LocalChar)
 	if err != nil || result == nil {
 		return result, err
 	}
 
-	// Remap the hover range from block-local to markdown coordinates
-	if result.Range != nil {
-		startLine, startChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
-			int(result.Range.Start.Line), int(result.Range.Start.Character))
-		endLine, endChar := mdSnap.BlockPositionToMarkdown(blockPos.BlockIndex,
-			int(result.Range.End.Line), int(result.Range.End.Character))
-		result.Range = &protocol.Range{
-			Start: protocol.Position{Line: analysis.ToUInteger(startLine), Character: analysis.ToUInteger(startChar)},
-			End:   protocol.Position{Line: analysis.ToUInteger(endLine), Character: analysis.ToUInteger(endChar)},
-		}
+	if unit.Remap != nil {
+		result.Range = unit.Remap.RemapRangePtr(result.Range)
 	}
-
 	return result, nil
 }
 

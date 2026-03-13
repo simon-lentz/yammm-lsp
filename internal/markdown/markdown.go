@@ -130,7 +130,7 @@ func VirtualSourceID(markdownPath string, blockIndex int) (location.SourceID, er
 //
 // COUPLING: assumes every valid yammm schema requires a top-level "schema" declaration.
 // If the yammm grammar ever makes this optional, this function and the snippetPrefix
-// logic in workspace.go's AnalyzeMarkdownAndPublish must be updated together.
+// logic in workspace.go's analyzeMarkdownAndPublish must be updated together.
 func HasSchemaDeclaration(content string) bool {
 	for line := range strings.SplitSeq(content, "\n") {
 		trimmed := strings.TrimSpace(line)

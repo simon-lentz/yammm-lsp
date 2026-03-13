@@ -257,7 +257,7 @@ func TestWorkspace_FindModuleRoot_CrossSymlink(t *testing.T) {
 	// File path via symlink should still match (after canonicalization)
 	symlinkFilePath := linkProject + "/schema.yammm"
 
-	// Canonicalize the file path as AnalyzeAndPublish would
+	// Canonicalize the file path as analyzeAndPublish would
 	canonicalFilePath, err := filepath.EvalSymlinks(symlinkFilePath)
 	if err != nil {
 		t.Fatalf("failed to resolve symlink file path: %v", err)
@@ -317,7 +317,7 @@ func TestWorkspace_DocumentLifecycle(t *testing.T) {
 	text := "type Person { name: String }"
 
 	// Open document
-	ws.DocumentOpened(uri, 1, text)
+	ws.documentOpened(uri, 1, text)
 
 	doc := ws.GetDocumentSnapshot(uri)
 	if doc == nil {
@@ -332,7 +332,7 @@ func TestWorkspace_DocumentLifecycle(t *testing.T) {
 
 	// Change document
 	newText := "type Person { name: String, age: Integer }"
-	ws.DocumentChanged(uri, 2, newText)
+	ws.documentChanged(uri, 2, newText)
 
 	doc = ws.GetDocumentSnapshot(uri)
 	if doc == nil {
@@ -363,7 +363,7 @@ func TestWorkspace_DocumentOpened_InvalidURI(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Invalid URI should be logged but document not added
-	ws.DocumentOpened("http://invalid", 1, "content")
+	ws.documentOpened("http://invalid", 1, "content")
 
 	doc := ws.GetDocumentSnapshot("http://invalid")
 	if doc != nil {
@@ -378,7 +378,7 @@ func TestWorkspace_DocumentChanged_NotOpen(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Changing a document that was never opened should be a no-op
-	ws.DocumentChanged("file:///not/open.yammm", 1, "content")
+	ws.documentChanged("file:///not/open.yammm", 1, "content")
 
 	doc := ws.GetDocumentSnapshot("file:///not/open.yammm")
 	if doc != nil {
@@ -569,8 +569,8 @@ func TestWorkspace_ConcurrentDocumentAccess(t *testing.T) {
 	for i := range numGoroutines {
 		wg.Go(func() {
 			uri := "file:///test/file.yammm"
-			ws.DocumentOpened(uri, i, "content")
-			ws.DocumentChanged(uri, i+1, "new content")
+			ws.documentOpened(uri, i, "content")
+			ws.documentChanged(uri, i+1, "new content")
 		})
 	}
 
@@ -604,7 +604,7 @@ func TestDocument_SourceID(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	uri := "file:///test/schema.yammm"
-	ws.DocumentOpened(uri, 1, "content")
+	ws.documentOpened(uri, 1, "content")
 
 	doc := ws.GetDocumentSnapshot(uri)
 	if doc == nil {
@@ -781,7 +781,7 @@ func TestBuildCanonicalToURIMap_SymlinkResolution(t *testing.T) {
 
 	// Open document via symlink URI
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.DocumentOpened(linkURI, 1, "content")
+	ws.documentOpened(linkURI, 1, "content")
 
 	// Build the canonical mapping
 	ws.mu.RLock()
@@ -819,7 +819,7 @@ func TestBuildCanonicalToURIMap_NoSymlinks(t *testing.T) {
 
 	// Open document via real path
 	realURI := lsputil.PathToURI(realPath)
-	ws.DocumentOpened(realURI, 1, "content")
+	ws.documentOpened(realURI, 1, "content")
 
 	// Build the canonical mapping
 	ws.mu.RLock()
@@ -872,11 +872,11 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 
 	// Open document via symlink URI FIRST (openOrder=1)
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.DocumentOpened(linkURI, 1, "content via symlink")
+	ws.documentOpened(linkURI, 1, "content via symlink")
 
 	// Open same document via real path URI SECOND (openOrder=2)
 	realURI := lsputil.PathToURI(realPath)
-	ws.DocumentOpened(realURI, 1, "content via real path")
+	ws.documentOpened(realURI, 1, "content via real path")
 
 	// Both documents should be tracked (different URIs)
 	ws.mu.RLock()
@@ -899,7 +899,7 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 	}
 
 	// Now close the symlink document
-	ws.DocumentClosed(nil, linkURI)
+	ws.documentClosed(nil, linkURI)
 
 	// Rebuild mapping - should now prefer the real path URI (only one remaining)
 	ws.mu.RLock()
@@ -1070,7 +1070,7 @@ func TestPublishSnapshotDiagnostics_SymlinkURIRemapping(t *testing.T) {
 
 	// Open document via symlink URI
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.DocumentOpened(linkURI, 1, "content")
+	ws.documentOpened(linkURI, 1, "content")
 
 	// Create a snapshot with diagnostics using the canonical (resolved) path
 	// This simulates what the loader produces
@@ -1136,7 +1136,7 @@ func TestPublishSnapshotDiagnostics_RelatedInfoURIRemapping(t *testing.T) {
 
 	// Open document via symlink URI
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.DocumentOpened(linkURI, 1, "content")
+	ws.documentOpened(linkURI, 1, "content")
 
 	// Create a snapshot with RelatedInformation also using canonical path
 	canonicalURI := lsputil.PathToURI(canonicalRealPath)
@@ -1241,8 +1241,8 @@ func TestComputePublicationPlan_PerEntryIsolation(t *testing.T) {
 	partsURI := "file:///parts.yammm"
 	otherURI := "file:///other.yammm"
 
-	ws.DocumentOpened(mainURI, 1, "import parts")
-	ws.DocumentOpened(otherURI, 1, "standalone")
+	ws.documentOpened(mainURI, 1, "import parts")
+	ws.documentOpened(otherURI, 1, "standalone")
 
 	// First analysis: main.yammm publishes diagnostics for main and parts
 	mainSnapshot := &analysis.Snapshot{
@@ -1327,8 +1327,8 @@ func TestComputePublicationPlan_SharedImportMultipleEntries(t *testing.T) {
 	otherURI := "file:///other.yammm"
 	sharedURI := "file:///shared.yammm"
 
-	ws.DocumentOpened(mainURI, 1, "import shared")
-	ws.DocumentOpened(otherURI, 1, "import shared")
+	ws.documentOpened(mainURI, 1, "import shared")
+	ws.documentOpened(otherURI, 1, "import shared")
 
 	// Both entries publish diagnostics for shared
 	mainSnapshot := &analysis.Snapshot{
@@ -1404,7 +1404,7 @@ func TestComputePublicationPlan_DocumentCloseClearsAllEntryURIs(t *testing.T) {
 	mainURI := "file:///main.yammm"
 	partsURI := "file:///parts.yammm"
 
-	ws.DocumentOpened(mainURI, 1, "import parts")
+	ws.documentOpened(mainURI, 1, "import parts")
 
 	// Publish diagnostics for both main and parts
 	snapshot := &analysis.Snapshot{
@@ -1483,7 +1483,7 @@ func TestWorkspace_FileChanged_SymlinkResolution(t *testing.T) {
 
 	// Create main.yammm that imports parts via canonical path
 	mainURI := "file:///main.yammm"
-	ws.DocumentOpened(mainURI, 1, "import parts")
+	ws.documentOpened(mainURI, 1, "import parts")
 
 	// Simulate the loader tracking: main depends on canonical parts path
 	ws.UpdateDependencies(mainURI, []string{canonicalParts})
@@ -1534,7 +1534,7 @@ func TestWorkspace_FileChanged_CanonicalPathMatching(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	mainURI := "file:///main.yammm"
-	ws.DocumentOpened(mainURI, 1, "content")
+	ws.documentOpened(mainURI, 1, "content")
 
 	// Set up dependency on a canonical path
 	canonicalPath := "/canonical/parts.yammm"
@@ -1570,9 +1570,9 @@ func TestWorkspace_FileChanged_CanonicalPathMatching(t *testing.T) {
 // delete *new* timers/cancels".
 //
 // The race scenario:
-// 1. ScheduleAnalysis(uri) creates entry0, schedules timer
-// 2. Timer fires, callback starts running AnalyzeAndPublish (takes time)
-// 3. User types, ScheduleAnalysis(uri) called again, creates entry1
+// 1. scheduleAnalysis(uri) creates entry0, schedules timer
+// 2. Timer fires, callback starts running analyzeAndPublish (takes time)
+// 3. User types, scheduleAnalysis(uri) called again, creates entry1
 // 4. Old callback finishes - must NOT delete entry1
 func TestScheduleAnalysis_EntryPointerIdentity(t *testing.T) {
 	t.Parallel()
@@ -1636,7 +1636,7 @@ func TestScheduleAnalysis_EntryPointerIdentity(t *testing.T) {
 }
 
 // TestScheduleAnalysis_RescheduleWhilePending verifies that calling
-// ScheduleAnalysis while a previous timer is pending correctly cancels
+// scheduleAnalysis while a previous timer is pending correctly cancels
 // the old entry and installs a new one.
 func TestScheduleAnalysis_RescheduleWhilePending(t *testing.T) {
 	t.Parallel()
@@ -1647,30 +1647,30 @@ func TestScheduleAnalysis_RescheduleWhilePending(t *testing.T) {
 	uri := "file:///test.yammm"
 
 	// First schedule
-	ws.ScheduleAnalysis(nil, uri)
+	ws.scheduleAnalysis(nil, uri)
 
 	ws.sched.debounceMu.Lock()
 	entry1 := ws.sched.debounces[uri]
 	ws.sched.debounceMu.Unlock()
 
 	if entry1 == nil {
-		t.Fatal("first ScheduleAnalysis should create entry")
+		t.Fatal("first scheduleAnalysis should create entry")
 	}
 
 	// Second schedule (while first timer is pending)
-	ws.ScheduleAnalysis(nil, uri)
+	ws.scheduleAnalysis(nil, uri)
 
 	ws.sched.debounceMu.Lock()
 	entry2 := ws.sched.debounces[uri]
 	ws.sched.debounceMu.Unlock()
 
 	if entry2 == nil {
-		t.Fatal("second ScheduleAnalysis should create entry")
+		t.Fatal("second scheduleAnalysis should create entry")
 	}
 
 	// entry2 should be different from entry1 (new allocation)
 	if entry1 == entry2 {
-		t.Error("second ScheduleAnalysis should create a new entry, not reuse the old one")
+		t.Error("second scheduleAnalysis should create a new entry, not reuse the old one")
 	}
 
 	// Clean up
@@ -1688,8 +1688,8 @@ func TestScheduleMarkdownAnalysis_EntryPointerIdentity(t *testing.T) {
 
 	uri := "file:///test.md"
 
-	// Set up a markdown document so ScheduleMarkdownAnalysis has something to work with
-	ws.MarkdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
+	// Set up a markdown document so scheduleMarkdownAnalysis has something to work with
+	ws.markdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
 
 	// Create entry0 (simulating first schedule)
 	ws.sched.debounceMu.Lock()
@@ -1742,7 +1742,7 @@ func TestScheduleMarkdownAnalysis_EntryPointerIdentity(t *testing.T) {
 }
 
 // TestScheduleMarkdownAnalysis_RescheduleWhilePending verifies that calling
-// ScheduleMarkdownAnalysis while a previous timer is pending correctly
+// scheduleMarkdownAnalysis while a previous timer is pending correctly
 // cancels the old entry and installs a new one.
 func TestScheduleMarkdownAnalysis_RescheduleWhilePending(t *testing.T) {
 	t.Parallel()
@@ -1753,32 +1753,32 @@ func TestScheduleMarkdownAnalysis_RescheduleWhilePending(t *testing.T) {
 	uri := "file:///test.md"
 
 	// Set up a markdown document
-	ws.MarkdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
+	ws.markdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
 
 	// First schedule
-	ws.ScheduleMarkdownAnalysis(nil, uri)
+	ws.scheduleMarkdownAnalysis(nil, uri)
 
 	ws.sched.debounceMu.Lock()
 	entry1 := ws.sched.debounces[uri]
 	ws.sched.debounceMu.Unlock()
 
 	if entry1 == nil {
-		t.Fatal("first ScheduleMarkdownAnalysis should create entry")
+		t.Fatal("first scheduleMarkdownAnalysis should create entry")
 	}
 
 	// Second schedule (while first timer is pending)
-	ws.ScheduleMarkdownAnalysis(nil, uri)
+	ws.scheduleMarkdownAnalysis(nil, uri)
 
 	ws.sched.debounceMu.Lock()
 	entry2 := ws.sched.debounces[uri]
 	ws.sched.debounceMu.Unlock()
 
 	if entry2 == nil {
-		t.Fatal("second ScheduleMarkdownAnalysis should create entry")
+		t.Fatal("second scheduleMarkdownAnalysis should create entry")
 	}
 
 	if entry1 == entry2 {
-		t.Error("second ScheduleMarkdownAnalysis should create a new entry, not reuse the old one")
+		t.Error("second scheduleMarkdownAnalysis should create a new entry, not reuse the old one")
 	}
 
 	// Clean up
@@ -1793,7 +1793,7 @@ func TestRemapPathToURI_OpenDocument(t *testing.T) {
 
 	// Open a document - the URI used by client
 	clientURI := "file:///symlink/path/schema.yammm"
-	ws.DocumentOpened(clientURI, 1, "content")
+	ws.documentOpened(clientURI, 1, "content")
 
 	// Get the canonical path from the document's SourceID
 	doc := ws.GetDocumentSnapshot(clientURI)
@@ -1858,7 +1858,7 @@ func TestRemapPathToURI_SymlinkResolution(t *testing.T) {
 
 	// Open document via symlink URI
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.DocumentOpened(linkURI, 1, "content")
+	ws.documentOpened(linkURI, 1, "content")
 
 	// RemapPathToURI with canonical path should return the symlink URI
 	result := ws.RemapPathToURI(canonicalRealPath)
@@ -1899,11 +1899,11 @@ func TestRemapPathToURI_MultipleDocumentsSameCanonical(t *testing.T) {
 
 	// Open via symlink FIRST (lower OpenOrder)
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.DocumentOpened(linkURI, 1, "content via symlink")
+	ws.documentOpened(linkURI, 1, "content via symlink")
 
 	// Open via real path SECOND (higher OpenOrder)
 	realURI := lsputil.PathToURI(realPath)
-	ws.DocumentOpened(realURI, 1, "content via real path")
+	ws.documentOpened(realURI, 1, "content via real path")
 
 	// RemapPathToURI should prefer the first-opened (symlink) URI
 	result := ws.RemapPathToURI(canonicalRealPath)
@@ -1912,7 +1912,7 @@ func TestRemapPathToURI_MultipleDocumentsSameCanonical(t *testing.T) {
 	}
 
 	// Close symlink document
-	ws.DocumentClosed(nil, linkURI)
+	ws.documentClosed(nil, linkURI)
 
 	// Now RemapPathToURI should return the real URI (only one remaining)
 	result = ws.RemapPathToURI(canonicalRealPath)
@@ -2163,7 +2163,7 @@ func TestDocumentOpened_CRLFNormalization(t *testing.T) {
 
 	// Open document with CRLF line endings
 	textWithCRLF := "type Person {\r\n\tname string\r\n}\r\n"
-	ws.DocumentOpened(uri, 1, textWithCRLF)
+	ws.documentOpened(uri, 1, textWithCRLF)
 
 	// Verify stored text has LF only
 	doc := ws.GetDocumentSnapshot(uri)
@@ -2196,11 +2196,11 @@ func TestDocumentChanged_CRLFNormalization(t *testing.T) {
 	uri := lsputil.PathToURI(path)
 
 	// Open document first (with LF)
-	ws.DocumentOpened(uri, 1, "type Test {}\n")
+	ws.documentOpened(uri, 1, "type Test {}\n")
 
 	// Change with CRLF line endings
 	textWithCRLF := "type Updated {\r\n\tfield int\r\n}\r\n"
-	ws.DocumentChanged(uri, 2, textWithCRLF)
+	ws.documentChanged(uri, 2, textWithCRLF)
 
 	// Verify stored text has LF only
 	doc := ws.GetDocumentSnapshot(uri)
@@ -2227,10 +2227,10 @@ func TestDocumentChanged_VersionOrdering(t *testing.T) {
 	uri := lsputil.PathToURI(path)
 
 	// Open document at version 5
-	ws.DocumentOpened(uri, 5, "version5")
+	ws.documentOpened(uri, 5, "version5")
 
 	// Try to update with older version (should be ignored)
-	ws.DocumentChanged(uri, 3, "version3-stale")
+	ws.documentChanged(uri, 3, "version3-stale")
 
 	doc := ws.GetDocumentSnapshot(uri)
 	if doc == nil {
@@ -2245,7 +2245,7 @@ func TestDocumentChanged_VersionOrdering(t *testing.T) {
 	}
 
 	// Update with newer version (should succeed)
-	ws.DocumentChanged(uri, 7, "version7")
+	ws.documentChanged(uri, 7, "version7")
 
 	doc = ws.GetDocumentSnapshot(uri)
 	if doc.Text != "version7" {
@@ -2270,10 +2270,10 @@ func TestDocumentChanged_VersionZeroAccepted(t *testing.T) {
 	uri := lsputil.PathToURI(path)
 
 	// Open document at version 5
-	ws.DocumentOpened(uri, 5, "version5")
+	ws.documentOpened(uri, 5, "version5")
 
 	// Update with version 0 (unknown) should be accepted
-	ws.DocumentChanged(uri, 0, "versionZero")
+	ws.documentChanged(uri, 0, "versionZero")
 
 	doc := ws.GetDocumentSnapshot(uri)
 	if doc == nil {
@@ -2301,7 +2301,7 @@ func TestDocumentChanged_Version0_InvalidatesLineStateCache(t *testing.T) {
 	uri := lsputil.PathToURI(path)
 
 	// Open document with version 0 and content that has brace depth 1
-	ws.DocumentOpened(uri, 0, "type A {")
+	ws.documentOpened(uri, 0, "type A {")
 
 	// Get snapshot to trigger lineState computation
 	doc1 := ws.GetDocumentSnapshot(uri)
@@ -2317,7 +2317,7 @@ func TestDocumentChanged_Version0_InvalidatesLineStateCache(t *testing.T) {
 	}
 
 	// Update with version 0 again but different content (brace depth 0)
-	ws.DocumentChanged(uri, 0, "type A {}")
+	ws.documentChanged(uri, 0, "type A {}")
 
 	// Get new snapshot - should have fresh lineState reflecting new content
 	doc2 := ws.GetDocumentSnapshot(uri)
@@ -2345,7 +2345,7 @@ func TestRemapPathToURI_ForwardSlashNormalization(t *testing.T) {
 
 	ws := NewWorkspace(nil, Config{})
 	uri := lsputil.PathToURI(path)
-	ws.DocumentOpened(uri, 1, "type Test {}")
+	ws.documentOpened(uri, 1, "type Test {}")
 
 	// On all platforms, RemapPathToURI should work with forward-slash paths
 	forwardSlashPath := filepath.ToSlash(path)
@@ -2403,5 +2403,164 @@ func TestRemapPathToURI_NonexistentPathWithDotDot(t *testing.T) {
 				t.Errorf("RemapPathToURI(%q) = %q; want %q", tt.input, result, tt.want)
 			}
 		})
+	}
+}
+
+// --- Diagnostic hash deduplication tests ---
+
+func TestPublishDiagnostics_HashDedup_SuppressesIdentical(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	ws := NewWorkspace(logger, Config{})
+	collector := &notificationCollector{}
+	uri := "file:///test.yammm"
+
+	diags := []protocol.Diagnostic{
+		{Message: "error one", Range: protocol.Range{}},
+	}
+
+	// First publish goes through.
+	ws.publishDiagnostics(collector.notify, uri, nil, diags)
+	if len(collector.entries) != 1 {
+		t.Fatalf("expected 1 notification after first publish, got %d", len(collector.entries))
+	}
+
+	// Second identical publish is suppressed.
+	ws.publishDiagnostics(collector.notify, uri, nil, diags)
+	if len(collector.entries) != 1 {
+		t.Errorf("expected 1 notification (identical suppressed), got %d", len(collector.entries))
+	}
+}
+
+func TestPublishDiagnostics_HashDedup_AllowsDifferent(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	ws := NewWorkspace(logger, Config{})
+	collector := &notificationCollector{}
+	uri := "file:///test.yammm"
+
+	diagsA := []protocol.Diagnostic{
+		{Message: "error A", Range: protocol.Range{}},
+	}
+	diagsB := []protocol.Diagnostic{
+		{Message: "error B", Range: protocol.Range{}},
+	}
+
+	ws.publishDiagnostics(collector.notify, uri, nil, diagsA)
+	ws.publishDiagnostics(collector.notify, uri, nil, diagsB)
+
+	if len(collector.entries) != 2 {
+		t.Errorf("expected 2 notifications for different diagnostics, got %d", len(collector.entries))
+	}
+}
+
+func TestPublishDiagnostics_HashDedup_EmptyDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	ws := NewWorkspace(logger, Config{})
+	collector := &notificationCollector{}
+	uri := "file:///test.yammm"
+
+	// Two successive empty publishes: first goes through, second is suppressed.
+	ws.publishDiagnostics(collector.notify, uri, nil, nil)
+	ws.publishDiagnostics(collector.notify, uri, nil, []protocol.Diagnostic{})
+
+	if len(collector.entries) != 1 {
+		t.Errorf("expected 1 notification (empty deduped), got %d", len(collector.entries))
+	}
+}
+
+func TestPublishDiagnostics_ClearHashOnClose_AllowsFreshPublish(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	ws := NewWorkspace(logger, Config{})
+	collector := &notificationCollector{}
+	uri := "file:///test.yammm"
+
+	diags := []protocol.Diagnostic{
+		{Message: "error", Range: protocol.Range{}},
+	}
+
+	// First publish.
+	ws.publishDiagnostics(collector.notify, uri, nil, diags)
+
+	// Clear hash (simulating document close).
+	ws.clearDiagHash(uri)
+
+	// Same diagnostics after hash clear: should publish again.
+	ws.publishDiagnostics(collector.notify, uri, nil, diags)
+
+	if len(collector.entries) != 2 {
+		t.Errorf("expected 2 notifications after hash clear, got %d", len(collector.entries))
+	}
+}
+
+func TestPublishDiagnostics_NilNotify_NoHash(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	ws := NewWorkspace(logger, Config{})
+	uri := "file:///test.yammm"
+
+	diags := []protocol.Diagnostic{
+		{Message: "error", Range: protocol.Range{}},
+	}
+
+	// Publish with nil notify (test context) should not store hash.
+	ws.publishDiagnostics(nil, uri, nil, diags)
+
+	ws.diagHashMu.Lock()
+	_, exists := ws.diagHashes[uri]
+	ws.diagHashMu.Unlock()
+
+	if exists {
+		t.Error("hash should not be stored when notify is nil")
+	}
+}
+
+func TestHashDiagnostics_Deterministic(t *testing.T) {
+	t.Parallel()
+
+	diags := []protocol.Diagnostic{
+		{
+			Message: "some error",
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 1, Character: 5},
+				End:   protocol.Position{Line: 1, Character: 10},
+			},
+		},
+		{
+			Message: "another error",
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 3, Character: 0},
+				End:   protocol.Position{Line: 3, Character: 7},
+			},
+		},
+	}
+
+	h1, ok1 := hashDiagnostics(diags)
+	h2, ok2 := hashDiagnostics(diags)
+
+	if !ok1 || !ok2 {
+		t.Fatal("hashDiagnostics returned !ok")
+	}
+	if h1 != h2 {
+		t.Errorf("hash not deterministic: %d != %d", h1, h2)
+	}
+
+	// Different diagnostics produce different hash.
+	different := []protocol.Diagnostic{
+		{Message: "different error", Range: protocol.Range{}},
+	}
+	h3, ok3 := hashDiagnostics(different)
+	if !ok3 {
+		t.Fatal("hashDiagnostics returned !ok for different input")
+	}
+	if h1 == h3 {
+		t.Error("different diagnostics should produce different hash")
 	}
 }

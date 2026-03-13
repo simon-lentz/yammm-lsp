@@ -172,7 +172,7 @@ func (d *docOverlay) allOpenURIs() []string {
 }
 
 // openMarkdownDocument creates a markdownDocument with normalized text and version.
-// Block extraction is deferred to AnalyzeMarkdownAndPublish.
+// Block extraction is deferred to analyzeMarkdownAndPublish.
 //
 // Must be called with Workspace.mu held.
 func (d *docOverlay) openMarkdownDocument(uri string, version int, text string) {
@@ -185,7 +185,7 @@ func (d *docOverlay) openMarkdownDocument(uri string, version int, text string) 
 
 // changeMarkdownDocument updates text and version for a markdown document.
 // Ignores stale updates (version <= current unless either is 0).
-// Does NOT re-extract blocks — that is done atomically by AnalyzeMarkdownAndPublish.
+// Does NOT re-extract blocks — that is done atomically by analyzeMarkdownAndPublish.
 //
 // Must be called with Workspace.mu held.
 func (d *docOverlay) changeMarkdownDocument(uri string, version int, text string, logger *slog.Logger) {

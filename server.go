@@ -261,7 +261,7 @@ func (s *Server) setTrace(_ context.Context, params *protocol.SetTraceParams) er
 // cancelRequest handles the $/cancelRequest notification.
 //
 // This method logs cancellation requests for debugging. The current implementation
-// relies on context-based cancellation in ScheduleAnalysis for debounced operations.
+// relies on context-based cancellation in scheduleAnalysis for debounced operations.
 func (s *Server) cancelRequest(_ context.Context, params *protocol.CancelParams) error {
 	s.logger.Debug("cancelRequest", slog.Any("id", params.ID))
 	return nil
@@ -274,22 +274,7 @@ func (s *Server) textDocumentDidOpen(ctx context.Context, params *protocol.DidOp
 		slog.String("uri", uri),
 		slog.Int("version", int(params.TextDocument.Version)),
 	)
-
-	notify := s.notifier(ctx)
-
-	switch {
-	case lsputil.IsYammmURI(uri):
-		s.workspace.DocumentOpened(uri, int(params.TextDocument.Version), params.TextDocument.Text)
-		s.workspace.AnalyzeAndPublish(notify, s.workspace.BackgroundContext(), uri) //nolint:contextcheck // analysis outlives request
-
-	case lsputil.IsMarkdownURI(uri):
-		s.workspace.MarkdownDocumentOpened(uri, int(params.TextDocument.Version), params.TextDocument.Text)
-		s.workspace.AnalyzeMarkdownAndPublish(notify, s.workspace.BackgroundContext(), uri) //nolint:contextcheck // analysis outlives request
-
-	default:
-		s.logger.Debug("ignoring didOpen for unsupported file type", slog.String("uri", uri))
-	}
-
+	s.workspace.OpenDocument(s.notifier(ctx), uri, int(params.TextDocument.Version), params.TextDocument.Text) //nolint:contextcheck // analysis uses workspace background context, not request context
 	return nil
 }
 
@@ -300,78 +285,8 @@ func (s *Server) textDocumentDidChange(ctx context.Context, params *protocol.Did
 		slog.String("uri", uri),
 		slog.Int("version", int(params.TextDocument.Version)),
 	)
-
-	switch {
-	case lsputil.IsYammmURI(uri):
-		// Existing .yammm path
-		if len(params.ContentChanges) > 0 {
-			var lastFullChange *protocol.TextDocumentContentChangeEventWhole
-			for _, rawChange := range params.ContentChanges {
-				if change, ok := rawChange.(protocol.TextDocumentContentChangeEventWhole); ok {
-					lastFullChange = &change
-				}
-			}
-
-			if lastFullChange != nil {
-				s.workspace.DocumentChanged(uri, int(params.TextDocument.Version), lastFullChange.Text)
-			} else if _, ok := params.ContentChanges[0].(protocol.TextDocumentContentChangeEvent); ok {
-				s.logger.Warn("received incremental change but server advertises full sync",
-					slog.String("uri", uri), slog.Int("version", int(params.TextDocument.Version)))
-				s.applyIncrementalChanges(params)
-			}
-		}
-		s.workspace.ScheduleAnalysis(s.notifier(ctx), uri) //nolint:contextcheck // notifyFunc captures ctx; ScheduleAnalysis is fire-and-forget
-
-	case lsputil.IsMarkdownURI(uri):
-		if len(params.ContentChanges) > 0 {
-			var lastFullChange *protocol.TextDocumentContentChangeEventWhole
-			for _, rawChange := range params.ContentChanges {
-				if change, ok := rawChange.(protocol.TextDocumentContentChangeEventWhole); ok {
-					lastFullChange = &change
-				}
-			}
-
-			if lastFullChange != nil {
-				s.workspace.MarkdownDocumentChanged(uri, int(params.TextDocument.Version), lastFullChange.Text)
-			} else if _, ok := params.ContentChanges[0].(protocol.TextDocumentContentChangeEvent); ok {
-				s.logger.Warn("received incremental change but server advertises full sync (markdown)",
-					slog.String("uri", uri), slog.Int("version", int(params.TextDocument.Version)))
-				currentText, ok := s.workspace.GetMarkdownCurrentText(uri)
-				if ok {
-					merged := mergeIncrementalChanges(currentText, s.workspace.PositionEncoding(),
-						params.ContentChanges, s.logger)
-					s.workspace.MarkdownDocumentChanged(uri, int(params.TextDocument.Version), merged)
-				}
-			}
-		}
-		s.workspace.ScheduleMarkdownAnalysis(s.notifier(ctx), uri) //nolint:contextcheck // notifyFunc captures ctx; schedule is fire-and-forget
-
-	default:
-		s.logger.Debug("ignoring didChange for unsupported file type", slog.String("uri", uri))
-	}
-
+	s.workspace.ChangeDocument(s.notifier(ctx), uri, int(params.TextDocument.Version), params.ContentChanges) //nolint:contextcheck // analysis uses workspace background context, not request context
 	return nil
-}
-
-// applyIncrementalChanges applies incremental text changes to a document.
-// This handles misbehaving clients that send incremental changes despite
-// the server advertising full sync mode.
-func (s *Server) applyIncrementalChanges(params *protocol.DidChangeTextDocumentParams) {
-	doc := s.workspace.GetDocumentSnapshot(params.TextDocument.URI)
-	if doc == nil {
-		s.logger.Warn("incremental change for unknown document",
-			slog.String("uri", params.TextDocument.URI),
-		)
-		return
-	}
-
-	text := mergeIncrementalChanges(doc.Text, s.workspace.PositionEncoding(), params.ContentChanges, s.logger)
-
-	s.workspace.DocumentChanged(
-		params.TextDocument.URI,
-		int(params.TextDocument.Version),
-		text,
-	)
 }
 
 // mergeIncrementalChanges applies incremental content changes to currentText
@@ -450,22 +365,8 @@ func normalizeLineEndings(text string) string {
 
 // textDocumentDidClose handles textDocument/didClose.
 func (s *Server) textDocumentDidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error {
-	uri := params.TextDocument.URI
-	s.logger.Debug("textDocument/didClose", slog.String("uri", uri))
-
-	notify := s.notifier(ctx)
-
-	switch {
-	case lsputil.IsYammmURI(uri):
-		s.workspace.DocumentClosed(notify, uri)
-
-	case lsputil.IsMarkdownURI(uri):
-		s.workspace.MarkdownDocumentClosed(notify, uri)
-
-	default:
-		s.logger.Debug("ignoring didClose for unsupported file type", slog.String("uri", uri))
-	}
-
+	s.logger.Debug("textDocument/didClose", slog.String("uri", params.TextDocument.URI))
+	s.workspace.CloseDocument(s.notifier(ctx), params.TextDocument.URI)
 	return nil
 }
 

@@ -58,50 +58,19 @@ func (s *Server) textDocumentCompletion(_ context.Context, params *protocol.Comp
 		"character", params.Position.Character,
 	)
 
-	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
-		return s.markdownCompletion(params, mdSnap)
-	}
-
-	snapshot := s.workspace.LatestSnapshot(uri)
-
-	doc := s.workspace.GetDocumentSnapshot(uri)
-	if doc == nil {
+	unit := s.resolveUnit(uri, int(params.Position.Line), int(params.Position.Character), false)
+	if unit == nil {
 		return nil, nil
 	}
 
-	return s.completionAtPosition(snapshot, doc,
-		int(params.Position.Line), int(params.Position.Character))
-}
-
-// markdownCompletion handles completion requests within yammm code blocks in markdown files.
-//
-//nolint:nilnil // LSP protocol: nil result means no completions
-func (s *Server) markdownCompletion(params *protocol.CompletionParams, mdSnap *markdownDocumentSnapshot) (any, error) {
-	blockPos := mdSnap.MarkdownPositionToBlock(int(params.Position.Line), int(params.Position.Character))
-	if blockPos == nil {
-		return nil, nil
-	}
-
-	// Extract snapshot (may be nil — completionAtPosition gracefully degrades
-	// to keywords, snippets, and built-in types without a snapshot).
-	var snapshot *analysis.Snapshot
-	if blockPos.BlockIndex < len(mdSnap.Snapshots) {
-		snapshot = mdSnap.Snapshots[blockPos.BlockIndex]
-	}
-
-	if blockPos.BlockIndex >= len(mdSnap.Blocks) {
-		return nil, nil
-	}
-	blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[blockPos.BlockIndex])
-
-	return s.completionAtPosition(snapshot, blockDocSnap, blockPos.LocalLine, blockPos.LocalChar)
+	return s.completionAtPosition(unit.Snapshot, unit.Doc, unit.LocalLine, unit.LocalChar), nil
 }
 
 // completionAtPosition returns completion items for the given position.
 // snapshot may be nil — graceful degradation provides keywords, snippets,
 // and built-in types without a schema.
 // The line and char parameters are LSP-encoding coordinates.
-func (s *Server) completionAtPosition(snapshot *analysis.Snapshot, doc *documentSnapshot, line, char int) (any, error) {
+func (s *Server) completionAtPosition(snapshot *analysis.Snapshot, doc *documentSnapshot, line, char int) any {
 	if snapshot != nil && snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for completion",
 			"uri", doc.URI,
@@ -165,7 +134,7 @@ func (s *Server) completionAtPosition(snapshot *analysis.Snapshot, doc *document
 		return cmp.Compare(a.Label, b.Label)
 	})
 
-	return items, nil
+	return items
 }
 
 // detectCompletionContext analyzes text around cursor to determine context.

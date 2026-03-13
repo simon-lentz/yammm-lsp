@@ -115,59 +115,50 @@ func TestServerName_Constant(t *testing.T) {
 	}
 }
 
-func TestApplyIncrementalChanges_MultipleChanges(t *testing.T) {
+func TestChangeDocument_IncrementalMultipleChanges(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	server := NewServer(logger, Config{})
+	ws := NewWorkspace(logger, Config{})
 
 	uri := "file:///test/multi-change.yammm"
 
 	// Open document with initial content: "line1\nline2\nline3"
-	server.workspace.DocumentOpened(uri, 1, "line1\nline2\nline3")
+	ws.documentOpened(uri, 1, "line1\nline2\nline3")
 
-	// Apply multiple incremental changes in a single notification.
+	// Apply multiple incremental changes via ChangeDocument.
 	// This tests that line offsets are correctly recomputed after each change.
 	//
 	// Change 1: Insert "X" at line 0, char 5 → "line1X\nline2\nline3"
 	// Change 2: Insert "Y" at line 1, char 5 → "line1X\nline2Y\nline3"
 	// Change 3: Insert "Z" at line 2, char 5 → "line1X\nline2Y\nline3Z"
-	//
-	// If line offsets weren't recomputed, changes 2 and 3 would be applied
-	// to incorrect positions.
-	params := &protocol.DidChangeTextDocumentParams{
-		TextDocument: protocol.VersionedTextDocumentIdentifier{
-			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri},
-			Version:                2,
+	changes := []any{
+		protocol.TextDocumentContentChangeEvent{
+			Range: &protocol.Range{
+				Start: protocol.Position{Line: 0, Character: 5},
+				End:   protocol.Position{Line: 0, Character: 5},
+			},
+			Text: "X",
 		},
-		ContentChanges: []any{
-			protocol.TextDocumentContentChangeEvent{
-				Range: &protocol.Range{
-					Start: protocol.Position{Line: 0, Character: 5},
-					End:   protocol.Position{Line: 0, Character: 5},
-				},
-				Text: "X",
+		protocol.TextDocumentContentChangeEvent{
+			Range: &protocol.Range{
+				Start: protocol.Position{Line: 1, Character: 5},
+				End:   protocol.Position{Line: 1, Character: 5},
 			},
-			protocol.TextDocumentContentChangeEvent{
-				Range: &protocol.Range{
-					Start: protocol.Position{Line: 1, Character: 5},
-					End:   protocol.Position{Line: 1, Character: 5},
-				},
-				Text: "Y",
+			Text: "Y",
+		},
+		protocol.TextDocumentContentChangeEvent{
+			Range: &protocol.Range{
+				Start: protocol.Position{Line: 2, Character: 5},
+				End:   protocol.Position{Line: 2, Character: 5},
 			},
-			protocol.TextDocumentContentChangeEvent{
-				Range: &protocol.Range{
-					Start: protocol.Position{Line: 2, Character: 5},
-					End:   protocol.Position{Line: 2, Character: 5},
-				},
-				Text: "Z",
-			},
+			Text: "Z",
 		},
 	}
 
-	server.applyIncrementalChanges(params)
+	ws.ChangeDocument(nil, uri, 2, changes)
 
-	doc := server.workspace.GetDocumentSnapshot(uri)
+	doc := ws.GetDocumentSnapshot(uri)
 	if doc == nil {
 		t.Fatal("document not found after changes")
 	}
@@ -178,39 +169,33 @@ func TestApplyIncrementalChanges_MultipleChanges(t *testing.T) {
 	}
 }
 
-func TestApplyIncrementalChanges_MultibyteUTF16(t *testing.T) {
+func TestChangeDocument_IncrementalMultibyteUTF16(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	server := NewServer(logger, Config{})
+	ws := NewWorkspace(logger, Config{})
 
 	uri := "file:///test/multibyte.yammm"
 
 	// Content with multibyte characters: emoji takes 2 UTF-16 code units
 	// "hello 🎉 world" - the emoji is at byte offset 6, but UTF-16 offset 6
-	server.workspace.DocumentOpened(uri, 1, "hello 🎉 world")
+	ws.documentOpened(uri, 1, "hello 🎉 world")
 
 	// Insert "X" after the emoji. In UTF-16, the emoji is 2 code units,
 	// so position after emoji is character 8 (h=0,e=1,l=2,l=3,o=4, =5,🎉=6-7, =8)
-	params := &protocol.DidChangeTextDocumentParams{
-		TextDocument: protocol.VersionedTextDocumentIdentifier{
-			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri},
-			Version:                2,
-		},
-		ContentChanges: []any{
-			protocol.TextDocumentContentChangeEvent{
-				Range: &protocol.Range{
-					Start: protocol.Position{Line: 0, Character: 8},
-					End:   protocol.Position{Line: 0, Character: 8},
-				},
-				Text: "X",
+	changes := []any{
+		protocol.TextDocumentContentChangeEvent{
+			Range: &protocol.Range{
+				Start: protocol.Position{Line: 0, Character: 8},
+				End:   protocol.Position{Line: 0, Character: 8},
 			},
+			Text: "X",
 		},
 	}
 
-	server.applyIncrementalChanges(params)
+	ws.ChangeDocument(nil, uri, 2, changes)
 
-	doc := server.workspace.GetDocumentSnapshot(uri)
+	doc := ws.GetDocumentSnapshot(uri)
 	if doc == nil {
 		t.Fatal("document not found after changes")
 	}
@@ -233,7 +218,7 @@ func TestDidChange_MultipleFullSyncChanges(t *testing.T) {
 	uri := "file:///test/multi-full-sync.yammm"
 
 	// Open document with initial content
-	server.workspace.DocumentOpened(uri, 1, "initial content")
+	server.workspace.documentOpened(uri, 1, "initial content")
 
 	// Send multiple full-sync changes in one notification.
 	// Only the LAST one should be applied.
@@ -271,41 +256,35 @@ func TestDidChange_MultipleFullSyncChanges(t *testing.T) {
 	}
 }
 
-func TestApplyIncrementalChanges_CRLF(t *testing.T) {
+func TestChangeDocument_IncrementalCRLF(t *testing.T) {
 	// Tests that CRLF line endings are handled correctly in incremental changes.
 	// Windows clients may send documents with CRLF (\r\n) line endings.
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	server := NewServer(logger, Config{})
+	ws := NewWorkspace(logger, Config{})
 
 	uri := "file:///test/crlf.yammm"
 
 	// Open document with CRLF line endings
-	server.workspace.DocumentOpened(uri, 1, "line1\r\nline2\r\nline3")
+	ws.documentOpened(uri, 1, "line1\r\nline2\r\nline3")
 
 	// Insert "X" at line 1, char 5 (after "line2")
 	// Without proper CRLF handling, the byte offset would be wrong because
 	// CRLF is 2 bytes but the code assumed 1 byte per newline.
-	params := &protocol.DidChangeTextDocumentParams{
-		TextDocument: protocol.VersionedTextDocumentIdentifier{
-			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri},
-			Version:                2,
-		},
-		ContentChanges: []any{
-			protocol.TextDocumentContentChangeEvent{
-				Range: &protocol.Range{
-					Start: protocol.Position{Line: 1, Character: 5},
-					End:   protocol.Position{Line: 1, Character: 5},
-				},
-				Text: "X",
+	changes := []any{
+		protocol.TextDocumentContentChangeEvent{
+			Range: &protocol.Range{
+				Start: protocol.Position{Line: 1, Character: 5},
+				End:   protocol.Position{Line: 1, Character: 5},
 			},
+			Text: "X",
 		},
 	}
 
-	server.applyIncrementalChanges(params)
+	ws.ChangeDocument(nil, uri, 2, changes)
 
-	doc := server.workspace.GetDocumentSnapshot(uri)
+	doc := ws.GetDocumentSnapshot(uri)
 	if doc == nil {
 		t.Fatal("document not found after changes")
 	}
@@ -318,38 +297,32 @@ func TestApplyIncrementalChanges_CRLF(t *testing.T) {
 	}
 }
 
-func TestApplyIncrementalChanges_MixedLineEndings(t *testing.T) {
+func TestChangeDocument_IncrementalMixedLineEndings(t *testing.T) {
 	// Tests handling of mixed line endings (some LF, some CRLF).
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	server := NewServer(logger, Config{})
+	ws := NewWorkspace(logger, Config{})
 
 	uri := "file:///test/mixed.yammm"
 
 	// Open document with mixed line endings: CRLF then LF then CRLF
-	server.workspace.DocumentOpened(uri, 1, "line1\r\nline2\nline3\r\nline4")
+	ws.documentOpened(uri, 1, "line1\r\nline2\nline3\r\nline4")
 
 	// Insert at line 2, char 5 (after "line3")
-	params := &protocol.DidChangeTextDocumentParams{
-		TextDocument: protocol.VersionedTextDocumentIdentifier{
-			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri},
-			Version:                2,
-		},
-		ContentChanges: []any{
-			protocol.TextDocumentContentChangeEvent{
-				Range: &protocol.Range{
-					Start: protocol.Position{Line: 2, Character: 5},
-					End:   protocol.Position{Line: 2, Character: 5},
-				},
-				Text: "Y",
+	changes := []any{
+		protocol.TextDocumentContentChangeEvent{
+			Range: &protocol.Range{
+				Start: protocol.Position{Line: 2, Character: 5},
+				End:   protocol.Position{Line: 2, Character: 5},
 			},
+			Text: "Y",
 		},
 	}
 
-	server.applyIncrementalChanges(params)
+	ws.ChangeDocument(nil, uri, 2, changes)
 
-	doc := server.workspace.GetDocumentSnapshot(uri)
+	doc := ws.GetDocumentSnapshot(uri)
 	if doc == nil {
 		t.Fatal("document not found after changes")
 	}
