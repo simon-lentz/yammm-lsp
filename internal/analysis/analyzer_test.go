@@ -1,4 +1,4 @@
-package lsp
+package analysis
 
 import (
 	"log/slog"
@@ -10,7 +10,6 @@ import (
 
 	"github.com/simon-lentz/yammm/location"
 
-	"github.com/simon-lentz/yammm-lsp/internal/analysis"
 	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
@@ -19,7 +18,7 @@ func TestNewAnalyzer(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	analyzer := analysis.NewAnalyzer(logger)
+	analyzer := NewAnalyzer(logger)
 
 	if analyzer == nil {
 		t.Fatal("NewAnalyzer() returned nil")
@@ -30,7 +29,7 @@ func TestSnapshot_Fields(t *testing.T) {
 	t.Parallel()
 
 	// Test that Snapshot fields are properly initialized
-	snapshot := &analysis.Snapshot{
+	snapshot := &Snapshot{
 		CreatedAt:       time.Now(),
 		EntrySourceID:   location.MustNewSourceID("test://file.yammm"),
 		EntryVersion:    5,
@@ -53,7 +52,7 @@ func TestURIDiagnostic(t *testing.T) {
 	t.Parallel()
 
 	// Test URIDiagnostic structure
-	uriDiag := analysis.URIDiagnostic{
+	uriDiag := URIDiagnostic{
 		URI: "file:///test/file.yammm",
 	}
 
@@ -76,9 +75,9 @@ func TestToUInteger_Positive(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := analysis.ToUInteger(tt.input)
+		got := ToUInteger(tt.input)
 		if got != tt.want {
-			t.Errorf("analysis.ToUInteger(%d) = %d; want %d", tt.input, got, tt.want)
+			t.Errorf("ToUInteger(%d) = %d; want %d", tt.input, got, tt.want)
 		}
 	}
 }
@@ -89,9 +88,9 @@ func TestToUInteger_Negative(t *testing.T) {
 	tests := []int{-1, -10, -1000}
 
 	for _, input := range tests {
-		got := analysis.ToUInteger(input)
+		got := ToUInteger(input)
 		if got != 0 {
-			t.Errorf("analysis.ToUInteger(%d) = %d; want 0 for negative", input, got)
+			t.Errorf("ToUInteger(%d) = %d; want 0 for negative", input, got)
 		}
 	}
 }
@@ -178,10 +177,10 @@ func TestOverlayPrecedenceOverDisk(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	analyzer := analysis.NewAnalyzer(logger)
+	analyzer := NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, diskPath, overlays, tmpDir, PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(ctx, diskPath, overlays, tmpDir, lsputil.PositionEncodingUTF16)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
 	}
@@ -259,11 +258,11 @@ func TestOverlayWithSymlinkPath_StillOverridesDisk(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	analyzer := analysis.NewAnalyzer(logger)
+	analyzer := NewAnalyzer(logger)
 
 	ctx := t.Context()
 	// Use symlink path as entry too (matches how workspace would call this)
-	snapshot, err := analyzer.Analyze(ctx, symlinkPath, overlays, linkDir, PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(ctx, symlinkPath, overlays, linkDir, lsputil.PositionEncodingUTF16)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
 	}
@@ -321,10 +320,10 @@ func TestLoadSources_PopulatesSourceRegistry(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	analyzer := analysis.NewAnalyzer(logger)
+	analyzer := NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir, PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir, lsputil.PositionEncodingUTF16)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
 	}
@@ -399,10 +398,10 @@ func TestLoadSources_DiskFallback(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	analyzer := analysis.NewAnalyzer(logger)
+	analyzer := NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir, PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir, lsputil.PositionEncodingUTF16)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
 	}
@@ -543,11 +542,11 @@ type TypeB {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	analyzer := analysis.NewAnalyzer(logger)
+	analyzer := NewAnalyzer(logger)
 	ctx := t.Context()
 
 	// Analyze requesting b_main.yammm as entry (even though a_types is lexicographically first)
-	snapshot, err := analyzer.Analyze(ctx, bPath, overlays, tmpDir, PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(ctx, bPath, overlays, tmpDir, lsputil.PositionEncodingUTF16)
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
 	}
@@ -578,7 +577,7 @@ func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	analyzer := analysis.NewAnalyzer(logger)
+	analyzer := NewAnalyzer(logger)
 
 	tests := []struct {
 		name    string
@@ -618,7 +617,7 @@ func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 				},
 			}
 
-			result := analyzer.ConvertRelatedInfo(related, nil, PositionEncodingUTF16)
+			result := analyzer.ConvertRelatedInfo(related, nil, lsputil.PositionEncodingUTF16)
 
 			if len(result) != 1 {
 				t.Fatalf("expected 1 related info, got %d", len(result))

@@ -1,24 +1,23 @@
-package lsp
+package definition_test
 
 import (
-	"log/slog"
-	"os"
 	"testing"
-
-	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/definition"
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+// identityURI is a trivial mapper that returns the input as a file:// URI.
+func identityURI(path string) string {
+	return lsputil.PathToURI(path)
 }
 
-func TestResolveSymbolDefinition_LocalType(t *testing.T) {
+func TestResolveSymbol_LocalType(t *testing.T) {
 	t.Parallel()
 
 	sourceID := location.MustNewSourceID("test://schema.yammm")
@@ -26,8 +25,6 @@ func TestResolveSymbolDefinition_LocalType(t *testing.T) {
 	selectionSpan := location.Range(sourceID, 5, 6, 5, 12)
 
 	typ := schema.NewType("Person", sourceID, span, "A person type", false, false)
-
-	s := NewServer(testLogger(), Config{})
 
 	sym := &symbols.Symbol{
 		Name:      "Person",
@@ -38,27 +35,17 @@ func TestResolveSymbolDefinition_LocalType(t *testing.T) {
 		Data:      typ,
 	}
 
-	// Snapshot with nil Sources triggers the fallback path in symbolToLocation
+	// Snapshot with nil Sources triggers the fallback path in SymbolToLocation
 	snapshot := &analysis.Snapshot{
 		Root:    "/test",
 		Sources: nil, // Will use fallback path
 	}
 
-	result, err := s.resolveSymbolDefinition(snapshot, sym)
-	if err != nil {
-		t.Fatalf("resolveSymbolDefinition error: %v", err)
-	}
-
-	loc, ok := result.(*protocol.Location)
-	if !ok {
-		t.Fatalf("expected *protocol.Location, got %T", result)
-	}
-
+	loc := definition.ResolveSymbol(snapshot, sym, lsputil.PositionEncodingUTF16, identityURI)
 	if loc == nil {
 		t.Fatal("expected non-nil location")
 	}
 
-	// URI is returned (actual URI depends on RemapPathToURI which is tested separately)
 	if loc.URI == "" {
 		t.Error("expected non-empty URI")
 	}
@@ -72,7 +59,7 @@ func TestResolveSymbolDefinition_LocalType(t *testing.T) {
 	}
 }
 
-func TestResolveSymbolDefinition_ImportWithoutSchema(t *testing.T) {
+func TestResolveSymbol_ImportWithoutSchema(t *testing.T) {
 	t.Parallel()
 
 	mainSourceID := location.MustNewSourceID("test://main.yammm")
@@ -82,8 +69,6 @@ func TestResolveSymbolDefinition_ImportWithoutSchema(t *testing.T) {
 	// Create an import WITHOUT a resolved schema (unresolved import)
 	imp := schema.NewImport("./missing", "missing", importedSourceID, importSpan)
 	// Don't call imp.SetSchema() - simulates unresolved import
-
-	s := NewServer(testLogger(), Config{})
 
 	sym := &symbols.Symbol{
 		Name:     "missing",
@@ -97,23 +82,18 @@ func TestResolveSymbolDefinition_ImportWithoutSchema(t *testing.T) {
 		Root: "/test",
 	}
 
-	result, err := s.resolveSymbolDefinition(snapshot, sym)
-	if err != nil {
-		t.Fatalf("resolveSymbolDefinition error: %v", err)
-	}
+	loc := definition.ResolveSymbol(snapshot, sym, lsputil.PositionEncodingUTF16, identityURI)
 
 	// Should return nil when import is unresolved (schema not loaded)
-	if result != nil {
-		t.Errorf("expected nil result for unresolved import, got %v", result)
+	if loc != nil {
+		t.Errorf("expected nil result for unresolved import, got %v", loc)
 	}
 }
 
-func TestResolveReferenceDefinition_NotFound(t *testing.T) {
+func TestResolveReference_NotFound(t *testing.T) {
 	t.Parallel()
 
 	sourceID := location.MustNewSourceID("test://schema.yammm")
-
-	s := NewServer(testLogger(), Config{})
 
 	// Create empty snapshot - ResolveTypeReference will return nil
 	snapshot := &analysis.Snapshot{
@@ -128,14 +108,11 @@ func TestResolveReferenceDefinition_NotFound(t *testing.T) {
 		Span:       location.Range(sourceID, 5, 10, 5, 20),
 	}
 
-	result, err := s.resolveReferenceDefinition(snapshot, ref, sourceID)
-	if err != nil {
-		t.Fatalf("resolveReferenceDefinition error: %v", err)
-	}
+	loc := definition.ResolveReference(snapshot, ref, sourceID, lsputil.PositionEncodingUTF16, identityURI)
 
 	// Should return nil when reference cannot be resolved
-	if result != nil {
-		t.Errorf("expected nil result for unresolved reference, got %v", result)
+	if loc != nil {
+		t.Errorf("expected nil result for unresolved reference, got %v", loc)
 	}
 }
 
@@ -145,8 +122,6 @@ func TestSymbolToLocation(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://types.yammm")
 	selectionSpan := location.Range(sourceID, 3, 6, 3, 12)
 	fullSpan := location.Range(sourceID, 3, 1, 8, 1)
-
-	s := NewServer(testLogger(), Config{})
 
 	sym := &symbols.Symbol{
 		Name:      "Customer",
@@ -162,13 +137,12 @@ func TestSymbolToLocation(t *testing.T) {
 		Sources: nil,
 	}
 
-	loc := s.symbolToLocation(snapshot, sym)
+	loc := definition.SymbolToLocation(snapshot.Sources, sym, lsputil.PositionEncodingUTF16, identityURI)
 
 	if loc == nil {
 		t.Fatal("expected non-nil location")
 	}
 
-	// URI is returned (actual URI depends on RemapPathToURI which is tested separately)
 	if loc.URI == "" {
 		t.Error("expected non-empty URI")
 	}
@@ -185,13 +159,7 @@ func TestSymbolToLocation(t *testing.T) {
 func TestSymbolToLocation_NilSymbol(t *testing.T) {
 	t.Parallel()
 
-	s := NewServer(testLogger(), Config{})
-
-	snapshot := &analysis.Snapshot{
-		Root: "/test",
-	}
-
-	loc := s.symbolToLocation(snapshot, nil)
+	loc := definition.SymbolToLocation(nil, nil, lsputil.PositionEncodingUTF16, identityURI)
 	if loc != nil {
 		t.Error("expected nil location for nil symbol")
 	}
@@ -202,8 +170,6 @@ func TestSymbolToLocation_ZeroRange(t *testing.T) {
 
 	sourceID := location.MustNewSourceID("test://types.yammm")
 
-	s := NewServer(testLogger(), Config{})
-
 	sym := &symbols.Symbol{
 		Name:     "NoRange",
 		Kind:     symbols.SymbolType,
@@ -211,11 +177,7 @@ func TestSymbolToLocation_ZeroRange(t *testing.T) {
 		Range:    location.Span{}, // zero span
 	}
 
-	snapshot := &analysis.Snapshot{
-		Root: "/test",
-	}
-
-	loc := s.symbolToLocation(snapshot, sym)
+	loc := definition.SymbolToLocation(nil, sym, lsputil.PositionEncodingUTF16, identityURI)
 	if loc != nil {
 		t.Error("expected nil location for symbol with zero range")
 	}

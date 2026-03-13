@@ -1,4 +1,4 @@
-package lsp
+package symbols_test
 
 import (
 	"testing"
@@ -437,7 +437,7 @@ func TestSpanToLSPRange_Conversion(t *testing.T) {
 	span := location.Range(sourceID, 5, 10, 7, 20) // 1-based
 
 	// SpanToLSPRange falls back to rune column conversion when source is not registered
-	start, end, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF16)
+	start, end, ok := lsputil.SpanToLSPRange(sources, span, lsputil.PositionEncodingUTF16)
 	if !ok {
 		t.Fatal("SpanToLSPRange returned !ok")
 	}

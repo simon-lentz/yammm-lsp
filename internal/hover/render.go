@@ -1,182 +1,43 @@
-package lsp
+// Package hover renders Markdown hover content for yammm schema symbols.
+package hover
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
-
-	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
-	"github.com/simon-lentz/yammm-lsp/internal/analysis"
-	"github.com/simon-lentz/yammm-lsp/internal/docstate"
-	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
-// textDocumentHover handles textDocument/hover requests.
-//
-//nolint:nilnil // LSP protocol: nil result means "no hover info"
-func (s *Server) textDocumentHover(_ context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
-	defer s.logTiming("textDocument/hover", time.Now())
-	uri := params.TextDocument.URI
-
-	s.logger.Debug("hover request",
-		"uri", uri,
-		"line", params.Position.Line,
-		"character", params.Position.Character,
-	)
-
-	unit := s.resolveUnit(uri, int(params.Position.Line), int(params.Position.Character), true)
-	if unit == nil {
-		return nil, nil
-	}
-
-	result, err := s.hoverAtPosition(unit.Snapshot, unit.Doc, unit.LocalLine, unit.LocalChar)
-	if err != nil || result == nil {
-		return result, err
-	}
-
-	if unit.Remap != nil {
-		result.Range = unit.Remap.RemapRangePtr(result.Range)
-	}
-	return result, nil
-}
-
-// hoverAtPosition returns hover info for the given position within a document.
-// The line and char parameters are LSP-encoding coordinates.
-// Returns nil, nil when no hover info is found.
-//
-//nolint:nilnil // LSP protocol: nil result means "no hover info"
-func (s *Server) hoverAtPosition(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char int) (*protocol.Hover, error) {
-	if snapshot.EntryVersion != doc.Version {
-		s.logger.Debug("serving stale snapshot for hover",
-			"uri", doc.URI,
-			"snapshot_version", snapshot.EntryVersion,
-			"doc_version", doc.Version,
-		)
-	}
-
-	idx := snapshot.SymbolIndexAt(doc.SourceID)
-	if idx == nil {
-		return nil, nil
-	}
-
-	internalPos, ok := lsputil.PositionFromLSP(
-		snapshot.Sources,
-		doc.SourceID,
-		line,
-		char,
-		s.workspace.PositionEncoding(),
-	)
-	if !ok {
-		return nil, nil
-	}
-
-	ref := idx.ReferenceAtPosition(internalPos)
-	if ref != nil {
-		targetSym := snapshot.ResolveTypeReference(ref, doc.SourceID)
-		if targetSym != nil {
-			return s.buildHoverForSymbolWithRange(targetSym, snapshot, &ref.Span)
-		}
-	}
-
-	sym := idx.SymbolAtPosition(internalPos)
-	if sym == nil {
-		return nil, nil
-	}
-
-	return s.buildHoverForSymbolWithRange(sym, snapshot, nil)
-}
-
-// buildHoverForSymbolWithRange generates hover content for a symbol.
-// If overrideRange is provided, it is used for the hover range instead of the symbol's span.
-// This is used when hovering a reference to use the reference's location, not the target's location.
-//
-//nolint:nilnil // nil result means no hover info for this symbol
-func (s *Server) buildHoverForSymbolWithRange(sym *symbols.Symbol, snapshot *analysis.Snapshot, overrideRange *location.Span) (*protocol.Hover, error) {
-	if sym == nil || snapshot == nil {
-		return nil, nil
-	}
-
-	var content string
-
+// RenderSymbol generates Markdown hover content for the given symbol.
+// The moduleRoot is used for relative path display in type hovers.
+// Returns empty string if the symbol kind is unknown or has no renderable data.
+func RenderSymbol(sym *symbols.Symbol, moduleRoot string) string {
 	switch sym.Kind {
 	case symbols.SymbolSchema:
-		content = hoverForSchema(sym)
+		return renderSchema(sym)
 	case symbols.SymbolImport:
-		content = hoverForImport(sym)
+		return renderImport(sym)
 	case symbols.SymbolType:
-		content = s.hoverForType(sym, snapshot)
+		return renderType(sym, moduleRoot)
 	case symbols.SymbolDataType:
-		content = hoverForDataType(sym)
+		return renderDataType(sym)
 	case symbols.SymbolProperty:
-		content = hoverForProperty(sym)
+		return renderProperty(sym)
 	case symbols.SymbolAssociation, symbols.SymbolComposition:
-		content = hoverForRelation(sym)
+		return renderRelation(sym)
 	case symbols.SymbolInvariant:
-		content = hoverForInvariant(sym)
+		return renderInvariant(sym)
 	default:
-		return nil, nil
+		return ""
 	}
-
-	if content == "" {
-		return nil, nil
-	}
-
-	// Always use Markdown: all hover renderers emit Markdown formatting (bold, backticks,
-	// fenced blocks, etc.). All mainstream LSP clients support Markdown. Capability
-	// negotiation was removed because returning Markdown content with Kind=PlainText
-	// is strictly worse than declaring Markdown—clients would display literal ** and ```.
-	contentKind := protocol.MarkupKindMarkdown
-
-	// Use override range if provided (e.g., when hovering a reference),
-	// otherwise use the symbol's own selection span.
-	rangeSpan := sym.Selection
-	if overrideRange != nil {
-		rangeSpan = *overrideRange
-	}
-
-	// Use proper UTF-16 conversion for the hover range
-	start, end, ok := lsputil.SpanToLSPRange(snapshot.Sources, rangeSpan, s.workspace.PositionEncoding())
-	if !ok {
-		// Fallback to naive conversion if span conversion fails
-		return &protocol.Hover{
-			Contents: protocol.MarkupContent{
-				Kind:  contentKind,
-				Value: content,
-			},
-			Range: &protocol.Range{
-				Start: protocol.Position{
-					Line:      analysis.ToUInteger(rangeSpan.Start.Line - 1),
-					Character: analysis.ToUInteger(rangeSpan.Start.Column - 1),
-				},
-				End: protocol.Position{
-					Line:      analysis.ToUInteger(rangeSpan.End.Line - 1),
-					Character: analysis.ToUInteger(rangeSpan.End.Column - 1),
-				},
-			},
-		}, nil
-	}
-
-	return &protocol.Hover{
-		Contents: protocol.MarkupContent{
-			Kind:  contentKind,
-			Value: content,
-		},
-		Range: &protocol.Range{
-			Start: protocol.Position{Line: analysis.ToUInteger(start[0]), Character: analysis.ToUInteger(start[1])},
-			End:   protocol.Position{Line: analysis.ToUInteger(end[0]), Character: analysis.ToUInteger(end[1])},
-		},
-	}, nil
 }
 
-// hoverForSchema generates hover content for a schema symbol.
-func hoverForSchema(sym *symbols.Symbol) string {
+// renderSchema generates hover content for a schema symbol.
+func renderSchema(sym *symbols.Symbol) string {
 	var b strings.Builder
 	b.WriteString("**schema** `")
 	b.WriteString(sym.Name)
@@ -184,8 +45,8 @@ func hoverForSchema(sym *symbols.Symbol) string {
 	return b.String()
 }
 
-// hoverForImport generates hover content for an import symbol.
-func hoverForImport(sym *symbols.Symbol) string {
+// renderImport generates hover content for an import symbol.
+func renderImport(sym *symbols.Symbol) string {
 	imp, ok := sym.Data.(*schema.Import)
 	if !ok {
 		return ""
@@ -208,8 +69,8 @@ func hoverForImport(sym *symbols.Symbol) string {
 	return b.String()
 }
 
-// hoverForType generates hover content for a type symbol.
-func (s *Server) hoverForType(sym *symbols.Symbol, snapshot *analysis.Snapshot) string {
+// renderType generates hover content for a type symbol.
+func renderType(sym *symbols.Symbol, moduleRoot string) string {
 	t, ok := sym.Data.(*schema.Type)
 	if !ok {
 		return ""
@@ -280,14 +141,14 @@ func (s *Server) hoverForType(sym *symbols.Symbol, snapshot *analysis.Snapshot) 
 
 	// Source location
 	if !sym.SourceID.IsZero() {
-		fmt.Fprintf(&b, "- Source: `%s`\n", s.relativeSourcePath(sym.SourceID, snapshot))
+		fmt.Fprintf(&b, "- Source: `%s`\n", relativeSourcePath(sym.SourceID, moduleRoot))
 	}
 
 	return b.String()
 }
 
-// hoverForDataType generates hover content for a datatype symbol.
-func hoverForDataType(sym *symbols.Symbol) string {
+// renderDataType generates hover content for a datatype symbol.
+func renderDataType(sym *symbols.Symbol) string {
 	dt, ok := sym.Data.(*schema.DataType)
 	if !ok {
 		return ""
@@ -309,8 +170,8 @@ func hoverForDataType(sym *symbols.Symbol) string {
 	return b.String()
 }
 
-// hoverForProperty generates hover content for a property symbol.
-func hoverForProperty(sym *symbols.Symbol) string {
+// renderProperty generates hover content for a property symbol.
+func renderProperty(sym *symbols.Symbol) string {
 	p, ok := sym.Data.(*schema.Property)
 	if !ok {
 		return ""
@@ -359,8 +220,8 @@ func hoverForProperty(sym *symbols.Symbol) string {
 	return b.String()
 }
 
-// hoverForRelation generates hover content for a relation symbol.
-func hoverForRelation(sym *symbols.Symbol) string {
+// renderRelation generates hover content for a relation symbol.
+func renderRelation(sym *symbols.Symbol) string {
 	r, ok := sym.Data.(*schema.Relation)
 	if !ok {
 		return ""
@@ -456,8 +317,8 @@ func hoverForRelation(sym *symbols.Symbol) string {
 	return b.String()
 }
 
-// hoverForInvariant generates hover content for an invariant symbol.
-func hoverForInvariant(sym *symbols.Symbol) string {
+// renderInvariant generates hover content for an invariant symbol.
+func renderInvariant(sym *symbols.Symbol) string {
 	inv, ok := sym.Data.(*schema.Invariant)
 	if !ok {
 		return ""
@@ -485,16 +346,16 @@ func hoverForInvariant(sym *symbols.Symbol) string {
 
 // relativeSourcePath returns a relative path for display in hover.
 // Paths are normalized to forward slashes for consistent cross-platform display.
-func (s *Server) relativeSourcePath(sourceID location.SourceID, snapshot *analysis.Snapshot) string {
-	if snapshot == nil || snapshot.Root == "" {
+func relativeSourcePath(sourceID location.SourceID, moduleRoot string) string {
+	if moduleRoot == "" {
 		return sourceID.String()
 	}
 
 	// SourceID.String() always uses forward slashes (via CanonicalPath).
-	// snapshot.Root uses OS-native separators. Normalize both to OS-native
+	// moduleRoot uses OS-native separators. Normalize both to OS-native
 	// for filepath.Rel, then convert result to forward slashes for display.
 	path := filepath.FromSlash(sourceID.String())
-	root := filepath.FromSlash(snapshot.Root)
+	root := filepath.FromSlash(moduleRoot)
 
 	rel, err := filepath.Rel(root, path)
 	if err != nil {

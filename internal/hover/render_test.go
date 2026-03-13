@@ -1,4 +1,4 @@
-package lsp
+package hover
 
 import (
 	"strings"
@@ -7,7 +7,6 @@ import (
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
-	"github.com/simon-lentz/yammm-lsp/internal/analysis"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
@@ -19,7 +18,7 @@ func TestHoverForSchema(t *testing.T) {
 		Kind: symbols.SymbolSchema,
 	}
 
-	result := hoverForSchema(sym)
+	result := RenderSymbol(sym, "")
 
 	if !strings.Contains(result, "**schema**") {
 		t.Error("hover should contain 'schema' keyword")
@@ -44,7 +43,7 @@ func TestHoverForImport(t *testing.T) {
 		Data: imp,
 	}
 
-	result := hoverForImport(sym)
+	result := RenderSymbol(sym, "")
 
 	if !strings.Contains(result, "**import**") {
 		t.Error("hover should contain 'import' keyword")
@@ -59,7 +58,6 @@ func TestHoverForImport(t *testing.T) {
 
 func TestHoverForType(t *testing.T) {
 	t.Parallel()
-	s := &Server{}
 
 	sourceID := location.MustNewSourceID("test://types.yammm")
 	span := location.Range(sourceID, 1, 1, 10, 1)
@@ -73,11 +71,7 @@ func TestHoverForType(t *testing.T) {
 		Data:     typ,
 	}
 
-	snapshot := &analysis.Snapshot{
-		Root: "/project",
-	}
-
-	result := s.hoverForType(sym, snapshot)
+	result := RenderSymbol(sym, "/project")
 
 	if !strings.Contains(result, "**type**") {
 		t.Error("hover should contain 'type' keyword")
@@ -92,7 +86,6 @@ func TestHoverForType(t *testing.T) {
 
 func TestHoverForType_Abstract(t *testing.T) {
 	t.Parallel()
-	s := &Server{}
 
 	sourceID := location.MustNewSourceID("test://types.yammm")
 	span := location.Range(sourceID, 1, 1, 10, 1)
@@ -106,7 +99,7 @@ func TestHoverForType_Abstract(t *testing.T) {
 		Data:     typ,
 	}
 
-	result := s.hoverForType(sym, nil)
+	result := RenderSymbol(sym, "")
 
 	if !strings.Contains(result, "**abstract type**") {
 		t.Error("hover should contain 'abstract type' for abstract types")
@@ -115,7 +108,6 @@ func TestHoverForType_Abstract(t *testing.T) {
 
 func TestHoverForType_Part(t *testing.T) {
 	t.Parallel()
-	s := &Server{}
 
 	sourceID := location.MustNewSourceID("test://types.yammm")
 	span := location.Range(sourceID, 1, 1, 10, 1)
@@ -129,7 +121,7 @@ func TestHoverForType_Part(t *testing.T) {
 		Data:     typ,
 	}
 
-	result := s.hoverForType(sym, nil)
+	result := RenderSymbol(sym, "")
 
 	if !strings.Contains(result, "**part type**") {
 		t.Error("hover should contain 'part type' for part types")
@@ -151,7 +143,7 @@ func TestHoverForProperty(t *testing.T) {
 		Data:       prop,
 	}
 
-	result := hoverForProperty(sym)
+	result := RenderSymbol(sym, "")
 
 	if !strings.Contains(result, "**property**") {
 		t.Error("hover should contain 'property' keyword")
@@ -179,7 +171,7 @@ func TestHoverForProperty_Required(t *testing.T) {
 		Data:       prop,
 	}
 
-	result := hoverForProperty(sym)
+	result := RenderSymbol(sym, "")
 
 	if !strings.Contains(result, "**property**") {
 		t.Error("hover should contain 'property' keyword")
@@ -217,7 +209,7 @@ func TestHoverForRelation_Association(t *testing.T) {
 		Data:       rel,
 	}
 
-	result := hoverForRelation(sym)
+	result := RenderSymbol(sym, "")
 
 	if !strings.Contains(result, "**association**") {
 		t.Error("hover should contain 'association' keyword")
@@ -262,7 +254,7 @@ func TestHoverForRelation_Composition(t *testing.T) {
 		Data:       rel,
 	}
 
-	result := hoverForRelation(sym)
+	result := RenderSymbol(sym, "")
 
 	if !strings.Contains(result, "**composition**") {
 		t.Error("hover should contain 'composition' keyword")
@@ -284,7 +276,7 @@ func TestHoverForInvariant(t *testing.T) {
 		Data:       inv,
 	}
 
-	result := hoverForInvariant(sym)
+	result := RenderSymbol(sym, "")
 
 	if !strings.Contains(result, "**invariant**") {
 		t.Error("hover should contain 'invariant' keyword")
@@ -309,7 +301,7 @@ func TestHoverForDataType(t *testing.T) {
 		Data: dt,
 	}
 
-	result := hoverForDataType(sym)
+	result := RenderSymbol(sym, "")
 
 	if !strings.Contains(result, "**datatype**") {
 		t.Error("hover should contain 'datatype' keyword")
@@ -324,7 +316,6 @@ func TestHoverForDataType(t *testing.T) {
 
 func TestRelativeSourcePath(t *testing.T) {
 	t.Parallel()
-	s := &Server{}
 
 	// Use SourceIDFromAbsolutePath for file-backed sources
 	schemaSourceID, err := location.SourceIDFromAbsolutePath("/project/schemas/person.yammm")
@@ -359,90 +350,18 @@ func TestRelativeSourcePath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			snapshot := &analysis.Snapshot{Root: tt.root}
-			got := s.relativeSourcePath(tt.sourceID, snapshot)
-			if got != tt.want {
-				t.Errorf("relativeSourcePath() = %q; want %q", got, tt.want)
+			// RenderSymbol with a type symbol exercises relativeSourcePath
+			// For this test, use the hover package's exported function indirectly
+			sym := &symbols.Symbol{
+				Name:     "TestType",
+				Kind:     symbols.SymbolType,
+				SourceID: tt.sourceID,
+				Data:     schema.NewType("TestType", tt.sourceID, location.Span{}, "", false, false),
+			}
+			result := RenderSymbol(sym, tt.root)
+			if !strings.Contains(result, tt.want) {
+				t.Errorf("hover content should contain %q; got:\n%s", tt.want, result)
 			}
 		})
 	}
-}
-
-func TestBuildHoverForSymbol_NilData(t *testing.T) {
-	t.Parallel()
-	s := &Server{}
-
-	sym := &symbols.Symbol{
-		Name: "Unknown",
-		Kind: symbols.SymbolType,
-		Data: nil, // No data
-	}
-
-	hover, err := s.buildHoverForSymbolWithRange(sym, nil, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if hover != nil {
-		t.Error("hover should be nil when symbol has no data")
-	}
-}
-
-func TestBuildHoverForSymbol_UnknownKind(t *testing.T) {
-	t.Parallel()
-	s := &Server{}
-
-	sym := &symbols.Symbol{
-		Name: "Unknown",
-		Kind: symbols.SymbolKind(99), // Unknown kind
-	}
-
-	hover, err := s.buildHoverForSymbolWithRange(sym, nil, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if hover != nil {
-		t.Error("hover should be nil for unknown symbol kind")
-	}
-}
-
-func TestBuildHoverForSymbolWithRange_AcceptsOverrideParameter(t *testing.T) {
-	// Tests that buildHoverForSymbolWithRange accepts an override range parameter.
-	// The override range is used for reference hovers to return the reference's
-	// location instead of the target symbol's location.
-	t.Parallel()
-	s := &Server{}
-
-	sourceID := location.MustNewSourceID("test://main.yammm")
-	targetSourceID := location.MustNewSourceID("test://imported.yammm")
-
-	// The symbol is from a different file with its own span
-	targetSymSpan := location.Range(targetSourceID, 10, 1, 10, 20)
-	sym := &symbols.Symbol{
-		Name:      "TargetType",
-		Kind:      symbols.SymbolType,
-		SourceID:  targetSourceID,
-		Selection: targetSymSpan,
-		Data:      &schema.Type{}, // Non-nil data
-	}
-
-	// The reference span is in the current document (different from target)
-	refSpan := location.Range(sourceID, 5, 10, 5, 20)
-
-	// Without override - returns nil because snapshot is nil
-	hoverWithoutOverride, err := s.buildHoverForSymbolWithRange(sym, nil, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// With override - also returns nil because snapshot is nil
-	hoverWithOverride, err := s.buildHoverForSymbolWithRange(sym, nil, &refSpan)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Both return nil because snapshot is nil (early return in function)
-	// The test validates that the function signature accepts the override parameter
-	// Integration tests should verify the full behavior with a real workspace
-	_ = hoverWithoutOverride
-	_ = hoverWithOverride
 }

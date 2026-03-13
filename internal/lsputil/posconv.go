@@ -140,6 +140,23 @@ func PositionFromLSP(
 	return sources.PositionAt(sourceID, byteOffset), true
 }
 
+// CharToByteOnLine converts an LSP character offset to a byte offset within
+// a single line's content, respecting the negotiated position encoding.
+//
+// For UTF-16: delegates to UTF16CharToByteOffset (handles surrogate pairs).
+// For UTF-8: character offset IS byte offset; clamped to line length.
+//
+// lineContent is the raw bytes of the line (no newline). The returned offset
+// is relative to the start of lineContent.
+func CharToByteOnLine(lineContent []byte, char int, enc PositionEncoding) int {
+	switch enc {
+	case PositionEncodingUTF8:
+		return min(char, len(lineContent))
+	default:
+		return UTF16CharToByteOffset(lineContent, 0, char)
+	}
+}
+
 // ByteToUTF16Offset converts a byte offset on a line to UTF-16 code units.
 // This is the inverse of UTF16CharToByteOffset, used for outbound conversion.
 //

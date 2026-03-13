@@ -1,4 +1,4 @@
-package lsp
+package workspace
 
 import (
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
@@ -6,28 +6,43 @@ import (
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
 	"github.com/simon-lentz/yammm-lsp/internal/docstate"
 	"github.com/simon-lentz/yammm-lsp/internal/markdown"
-	"github.com/simon-lentz/yammm-lsp/internal/workspace"
 )
 
-// analysisUnit is a normalized view of an analysis context for a single
+// Unit is a normalized view of an analysis context for a single
 // document or code block. Abstracts the difference between standalone
 // .yammm files and yammm code blocks embedded in markdown.
-type analysisUnit struct {
+type Unit struct {
 	Snapshot  *analysis.Snapshot // May be nil (completion gracefully degrades)
 	Doc       *docstate.Snapshot
 	LocalLine int // Position in document/block-local coordinates
 	LocalChar int
-	Remap     *blockRemap // nil for standalone .yammm files
+	Remap     *BlockRemap // nil for standalone .yammm files
 }
 
-// blockRemap translates block-local coordinates back to markdown-file coordinates.
-type blockRemap struct {
-	mdSnap     *workspace.MarkdownDocumentSnapshot
+// BlockRemap translates block-local coordinates back to markdown-file coordinates.
+type BlockRemap struct {
+	mdSnap     *MarkdownDocumentSnapshot
 	blockIndex int
 }
 
+// NewBlockRemap creates a BlockRemap for the given markdown snapshot and block index.
+// Intended for use in tests; production code obtains BlockRemap via ResolveUnit.
+func NewBlockRemap(mdSnap *MarkdownDocumentSnapshot, blockIndex int) *BlockRemap {
+	return &BlockRemap{mdSnap: mdSnap, blockIndex: blockIndex}
+}
+
+// Block returns the code block associated with this remap.
+func (r *BlockRemap) Block() markdown.CodeBlock {
+	return r.mdSnap.Blocks[r.blockIndex]
+}
+
+// DocumentURI returns the URI of the markdown document.
+func (r *BlockRemap) DocumentURI() string {
+	return r.mdSnap.URI
+}
+
 // RemapRange remaps a block-local range to markdown-file coordinates.
-func (r *blockRemap) RemapRange(rng protocol.Range) protocol.Range {
+func (r *BlockRemap) RemapRange(rng protocol.Range) protocol.Range {
 	startLine, startChar := r.mdSnap.BlockPositionToMarkdown(r.blockIndex,
 		int(rng.Start.Line), int(rng.Start.Character))
 	endLine, endChar := r.mdSnap.BlockPositionToMarkdown(r.blockIndex,
@@ -39,7 +54,7 @@ func (r *blockRemap) RemapRange(rng protocol.Range) protocol.Range {
 }
 
 // RemapRangePtr remaps a range pointer. Returns nil for nil input.
-func (r *blockRemap) RemapRangePtr(rng *protocol.Range) *protocol.Range {
+func (r *BlockRemap) RemapRangePtr(rng *protocol.Range) *protocol.Range {
 	if rng == nil {
 		return nil
 	}
@@ -47,14 +62,14 @@ func (r *blockRemap) RemapRangePtr(rng *protocol.Range) *protocol.Range {
 	return &remapped
 }
 
-// resolveUnit resolves the analysis unit for a cursor position.
+// ResolveUnit resolves the analysis unit for a cursor position.
 // For .yammm: returns file snapshot + docSnapshot at the given position.
 // For markdown: maps cursor to a code block, returns block snapshot + block docSnapshot at block-local position.
 // snapshotRequired=true returns nil when snapshot is nil (hover, definition).
 // snapshotRequired=false allows nil snapshot (completion degrades to keywords).
-func (s *Server) resolveUnit(uri string, line, char int, snapshotRequired bool) *analysisUnit {
+func (w *Workspace) ResolveUnit(uri string, line, char int, snapshotRequired bool) *Unit {
 	// Try markdown first
-	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
+	if mdSnap := w.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
 		blockPos := mdSnap.MarkdownPositionToBlock(line, char)
 		if blockPos == nil {
 			return nil
@@ -73,14 +88,14 @@ func (s *Server) resolveUnit(uri string, line, char int, snapshotRequired bool) 
 			return nil
 		}
 
-		blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[blockPos.BlockIndex])
+		blockDocSnap := BuildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[blockPos.BlockIndex])
 
-		return &analysisUnit{
+		return &Unit{
 			Snapshot:  snapshot,
 			Doc:       blockDocSnap,
 			LocalLine: blockPos.LocalLine,
 			LocalChar: blockPos.LocalChar,
-			Remap: &blockRemap{
+			Remap: &BlockRemap{
 				mdSnap:     mdSnap,
 				blockIndex: blockPos.BlockIndex,
 			},
@@ -88,17 +103,17 @@ func (s *Server) resolveUnit(uri string, line, char int, snapshotRequired bool) 
 	}
 
 	// Standalone .yammm file
-	snapshot := s.workspace.LatestSnapshot(uri)
+	snapshot := w.LatestSnapshot(uri)
 	if snapshotRequired && snapshot == nil {
 		return nil
 	}
 
-	doc := s.workspace.GetDocumentSnapshot(uri)
+	doc := w.GetDocumentSnapshot(uri)
 	if doc == nil {
 		return nil
 	}
 
-	return &analysisUnit{
+	return &Unit{
 		Snapshot:  snapshot,
 		Doc:       doc,
 		LocalLine: line,
@@ -107,22 +122,22 @@ func (s *Server) resolveUnit(uri string, line, char int, snapshotRequired bool) 
 	}
 }
 
-// resolveAllUnits returns one analysisUnit per analysis region in the document.
+// ResolveAllUnits returns one Unit per analysis region in the document.
 // For .yammm: single unit. For markdown: one per code block with non-nil snapshot.
 // Used by symbols (document-wide, not cursor-centric).
-func (s *Server) resolveAllUnits(uri string) []analysisUnit {
+func (w *Workspace) ResolveAllUnits(uri string) []Unit {
 	// Try markdown first
-	if mdSnap := s.workspace.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
-		var units []analysisUnit
+	if mdSnap := w.GetMarkdownDocumentSnapshot(uri); mdSnap != nil {
+		var units []Unit
 		for i, snapshot := range mdSnap.Snapshots {
 			if snapshot == nil || i >= len(mdSnap.Blocks) {
 				continue
 			}
-			blockDocSnap := s.buildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[i])
-			units = append(units, analysisUnit{
+			blockDocSnap := BuildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[i])
+			units = append(units, Unit{
 				Snapshot: snapshot,
 				Doc:      blockDocSnap,
-				Remap: &blockRemap{
+				Remap: &BlockRemap{
 					mdSnap:     mdSnap,
 					blockIndex: i,
 				},
@@ -132,28 +147,28 @@ func (s *Server) resolveAllUnits(uri string) []analysisUnit {
 	}
 
 	// Standalone .yammm file
-	snapshot := s.workspace.LatestSnapshot(uri)
+	snapshot := w.LatestSnapshot(uri)
 	if snapshot == nil {
 		return nil
 	}
 
-	doc := s.workspace.GetDocumentSnapshot(uri)
+	doc := w.GetDocumentSnapshot(uri)
 	if doc == nil {
 		return nil
 	}
 
-	return []analysisUnit{{
+	return []Unit{{
 		Snapshot: snapshot,
 		Doc:      doc,
 		Remap:    nil,
 	}}
 }
 
-// buildBlockDocumentSnapshot creates a docstate.Snapshot for a single code block
+// BuildBlockDocumentSnapshot creates a docstate.Snapshot for a single code block
 // within a markdown document. This is the shared utility used by all feature
 // providers (hover, completion, definition, symbols) to bridge between
 // markdown-level state and block-level analysis.
-func (s *Server) buildBlockDocumentSnapshot(mdSnap *workspace.MarkdownDocumentSnapshot, block markdown.CodeBlock) *docstate.Snapshot {
+func BuildBlockDocumentSnapshot(mdSnap *MarkdownDocumentSnapshot, block markdown.CodeBlock) *docstate.Snapshot {
 	depths, inComment := docstate.ComputeBraceDepths(block.Content)
 	return &docstate.Snapshot{
 		URI:      mdSnap.URI,

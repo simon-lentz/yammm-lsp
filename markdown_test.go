@@ -1517,7 +1517,6 @@ func analyzeMarkdownForTest(t *testing.T, s *Server, uri, content string) *works
 func TestBuildBlockDocumentSnapshot(t *testing.T) {
 	t.Parallel()
 
-	s := testServerWithLogger()
 	mdSnap := &workspace.MarkdownDocumentSnapshot{
 		URI:     "file:///test/doc.md",
 		Version: 42,
@@ -1536,7 +1535,7 @@ func TestBuildBlockDocumentSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	mdSnap.Blocks[0].SourceID = id
 
-	docSnap := s.buildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[0])
+	docSnap := workspace.BuildBlockDocumentSnapshot(mdSnap, mdSnap.Blocks[0])
 
 	assert.Equal(t, mdSnap.URI, docSnap.URI, "URI should come from mdSnap")
 	assert.Equal(t, id, docSnap.SourceID, "SourceID should come from block")
@@ -1643,7 +1642,7 @@ func TestRemapDocumentSymbolRanges(t *testing.T) {
 			t.Parallel()
 
 			mdSnap := &workspace.MarkdownDocumentSnapshot{Blocks: tt.blocks}
-			remap := &blockRemap{mdSnap: mdSnap, blockIndex: tt.blockIndex}
+			remap := workspace.NewBlockRemap(mdSnap, tt.blockIndex)
 			result := remapDocumentSymbolRanges(tt.symbols, remap)
 
 			if tt.wantNil {

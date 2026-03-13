@@ -1,12 +1,10 @@
-package lsp
+package lsputil
 
 import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/source"
-
-	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 )
 
 func TestByteOffsetFromLSP_UTF16_ASCII(t *testing.T) {
@@ -37,12 +35,12 @@ func TestByteOffsetFromLSP_UTF16_ASCII(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := lsputil.ByteOffsetFromLSP(sources, sourceID, tt.line, tt.char, PositionEncodingUTF16)
+			got, ok := ByteOffsetFromLSP(sources, sourceID, tt.line, tt.char, PositionEncodingUTF16)
 			if !ok {
 				t.Fatal("ByteOffsetFromLSP returned ok=false")
 			}
 			if got != tt.wantByte {
-				t.Errorf("lsputil.ByteOffsetFromLSP(line=%d, char=%d) = %d; want %d",
+				t.Errorf("ByteOffsetFromLSP(line=%d, char=%d) = %d; want %d",
 					tt.line, tt.char, got, tt.wantByte)
 			}
 		})
@@ -77,12 +75,12 @@ func TestByteOffsetFromLSP_UTF16_BMP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := lsputil.ByteOffsetFromLSP(sources, sourceID, 0, tt.char, PositionEncodingUTF16)
+			got, ok := ByteOffsetFromLSP(sources, sourceID, 0, tt.char, PositionEncodingUTF16)
 			if !ok {
 				t.Fatal("ByteOffsetFromLSP returned ok=false")
 			}
 			if got != tt.wantByte {
-				t.Errorf("lsputil.ByteOffsetFromLSP(char=%d) = %d; want %d",
+				t.Errorf("ByteOffsetFromLSP(char=%d) = %d; want %d",
 					tt.char, got, tt.wantByte)
 			}
 		})
@@ -116,12 +114,12 @@ func TestByteOffsetFromLSP_UTF16_Surrogate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := lsputil.ByteOffsetFromLSP(sources, sourceID, 0, tt.char, PositionEncodingUTF16)
+			got, ok := ByteOffsetFromLSP(sources, sourceID, 0, tt.char, PositionEncodingUTF16)
 			if !ok {
 				t.Fatal("ByteOffsetFromLSP returned ok=false")
 			}
 			if got != tt.wantByte {
-				t.Errorf("lsputil.ByteOffsetFromLSP(char=%d) = %d; want %d",
+				t.Errorf("ByteOffsetFromLSP(char=%d) = %d; want %d",
 					tt.char, got, tt.wantByte)
 			}
 		})
@@ -153,12 +151,12 @@ func TestByteOffsetFromLSP_UTF16_CJK(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := lsputil.ByteOffsetFromLSP(sources, sourceID, 0, tt.char, PositionEncodingUTF16)
+			got, ok := ByteOffsetFromLSP(sources, sourceID, 0, tt.char, PositionEncodingUTF16)
 			if !ok {
 				t.Fatal("ByteOffsetFromLSP returned ok=false")
 			}
 			if got != tt.wantByte {
-				t.Errorf("lsputil.ByteOffsetFromLSP(char=%d) = %d; want %d",
+				t.Errorf("ByteOffsetFromLSP(char=%d) = %d; want %d",
 					tt.char, got, tt.wantByte)
 			}
 		})
@@ -190,12 +188,12 @@ func TestByteOffsetFromLSP_UTF8_Encoding(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := lsputil.ByteOffsetFromLSP(sources, sourceID, 0, tt.char, PositionEncodingUTF8)
+			got, ok := ByteOffsetFromLSP(sources, sourceID, 0, tt.char, PositionEncodingUTF8)
 			if !ok {
 				t.Fatal("ByteOffsetFromLSP returned ok=false")
 			}
 			if got != tt.wantByte {
-				t.Errorf("lsputil.ByteOffsetFromLSP(char=%d, UTF8) = %d; want %d",
+				t.Errorf("ByteOffsetFromLSP(char=%d, UTF8) = %d; want %d",
 					tt.char, got, tt.wantByte)
 			}
 		})
@@ -239,12 +237,12 @@ func TestByteOffsetFromLSP_MultiLine(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := lsputil.ByteOffsetFromLSP(sources, sourceID, tt.line, tt.char, PositionEncodingUTF16)
+			got, ok := ByteOffsetFromLSP(sources, sourceID, tt.line, tt.char, PositionEncodingUTF16)
 			if !ok {
 				t.Fatal("ByteOffsetFromLSP returned ok=false")
 			}
 			if got != tt.wantByte {
-				t.Errorf("lsputil.ByteOffsetFromLSP(line=%d, char=%d) = %d; want %d",
+				t.Errorf("ByteOffsetFromLSP(line=%d, char=%d) = %d; want %d",
 					tt.line, tt.char, got, tt.wantByte)
 			}
 		})
@@ -262,9 +260,9 @@ func TestByteOffsetFromLSP_InvalidLine(t *testing.T) {
 	}
 
 	// Invalid line should return ok=false
-	_, ok := lsputil.ByteOffsetFromLSP(sources, sourceID, 10, 0, PositionEncodingUTF16)
+	_, ok := ByteOffsetFromLSP(sources, sourceID, 10, 0, PositionEncodingUTF16)
 	if ok {
-		t.Error("lsputil.ByteOffsetFromLSP(line=10) should return ok=false for invalid line")
+		t.Error("ByteOffsetFromLSP(line=10) should return ok=false for invalid line")
 	}
 }
 
@@ -275,9 +273,9 @@ func TestByteOffsetFromLSP_UnknownSource(t *testing.T) {
 	sourceID := location.MustNewSourceID("test://unknown.yammm")
 
 	// Unknown source should return ok=false
-	_, ok := lsputil.ByteOffsetFromLSP(sources, sourceID, 0, 5, PositionEncodingUTF16)
+	_, ok := ByteOffsetFromLSP(sources, sourceID, 0, 5, PositionEncodingUTF16)
 	if ok {
-		t.Error("lsputil.ByteOffsetFromLSP(unknown source) should return ok=false")
+		t.Error("ByteOffsetFromLSP(unknown source) should return ok=false")
 	}
 }
 
@@ -294,13 +292,13 @@ func TestByteOffsetFromLSP_DefaultEncoding(t *testing.T) {
 	}
 
 	// Unknown encoding should default to UTF-16
-	got, ok := lsputil.ByteOffsetFromLSP(sources, sourceID, 0, 3, PositionEncoding("unknown"))
+	got, ok := ByteOffsetFromLSP(sources, sourceID, 0, 3, PositionEncoding("unknown"))
 	if !ok {
 		t.Fatal("ByteOffsetFromLSP returned ok=false")
 	}
 	// char 3 in UTF-16 = after emoji = byte 5
 	if got != 5 {
-		t.Errorf("lsputil.ByteOffsetFromLSP(unknown encoding, char=3) = %d; want 5", got)
+		t.Errorf("ByteOffsetFromLSP(unknown encoding, char=3) = %d; want 5", got)
 	}
 }
 
@@ -308,14 +306,14 @@ func TestUtf16CharToByteOffset_Negative(t *testing.T) {
 	t.Parallel()
 
 	content := []byte("hello")
-	got := lsputil.UTF16CharToByteOffset(content, 0, -1)
+	got := UTF16CharToByteOffset(content, 0, -1)
 	if got != 0 {
-		t.Errorf("lsputil.UTF16CharToByteOffset(charOffset=-1) = %d; want 0", got)
+		t.Errorf("UTF16CharToByteOffset(charOffset=-1) = %d; want 0", got)
 	}
 
-	got = lsputil.UTF16CharToByteOffset(content, 0, 0)
+	got = UTF16CharToByteOffset(content, 0, 0)
 	if got != 0 {
-		t.Errorf("lsputil.UTF16CharToByteOffset(charOffset=0) = %d; want 0", got)
+		t.Errorf("UTF16CharToByteOffset(charOffset=0) = %d; want 0", got)
 	}
 }
 
@@ -324,10 +322,10 @@ func TestUtf16CharToByteOffset_StopsAtNewline(t *testing.T) {
 
 	content := []byte("ab\ncd")
 	// Should stop at newline character
-	got := lsputil.UTF16CharToByteOffset(content, 0, 10)
+	got := UTF16CharToByteOffset(content, 0, 10)
 	// Should stop at byte 2 (the newline)
 	if got != 2 {
-		t.Errorf("lsputil.UTF16CharToByteOffset(past newline) = %d; want 2", got)
+		t.Errorf("UTF16CharToByteOffset(past newline) = %d; want 2", got)
 	}
 }
 
@@ -336,11 +334,11 @@ func TestUtf16CharToByteOffset_InvalidUTF8(t *testing.T) {
 
 	// Invalid UTF-8 sequence: continuation byte without lead byte
 	content := []byte{0x80, 0x81, 'a', 'b'}
-	got := lsputil.UTF16CharToByteOffset(content, 0, 2)
+	got := UTF16CharToByteOffset(content, 0, 2)
 	// Each invalid byte should be counted as 1 UTF-16 unit
 	// So char 2 should be at byte 2
 	if got != 2 {
-		t.Errorf("lsputil.UTF16CharToByteOffset(invalid UTF-8) = %d; want 2", got)
+		t.Errorf("UTF16CharToByteOffset(invalid UTF-8) = %d; want 2", got)
 	}
 }
 
@@ -350,9 +348,9 @@ func TestSpanToLSPRange_ZeroSpan(t *testing.T) {
 	sources := source.NewRegistry()
 	var span location.Span // zero span
 
-	_, _, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF16)
+	_, _, ok := SpanToLSPRange(sources, span, PositionEncodingUTF16)
 	if ok {
-		t.Error("lsputil.SpanToLSPRange(zero span) = ok; want !ok")
+		t.Error("SpanToLSPRange(zero span) = ok; want !ok")
 	}
 }
 
@@ -366,9 +364,9 @@ func TestSpanToLSPRange_UnknownStart(t *testing.T) {
 		// Start is unknown (zero Position)
 	}
 
-	_, _, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF16)
+	_, _, ok := SpanToLSPRange(sources, span, PositionEncodingUTF16)
 	if ok {
-		t.Error("lsputil.SpanToLSPRange(unknown start) = ok; want !ok")
+		t.Error("SpanToLSPRange(unknown start) = ok; want !ok")
 	}
 }
 
@@ -384,9 +382,9 @@ func TestSpanToLSPRange_Valid(t *testing.T) {
 	}
 
 	// When content is not registered, falls back to rune column conversion
-	start, end, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF16)
+	start, end, ok := SpanToLSPRange(sources, span, PositionEncodingUTF16)
 	if !ok {
-		t.Fatal("lsputil.SpanToLSPRange() = !ok; want ok")
+		t.Fatal("SpanToLSPRange() = !ok; want ok")
 	}
 
 	// Extract values (fixed-size arrays, safe to index)
@@ -423,9 +421,9 @@ func TestSpanToLSPRange_PointSpan(t *testing.T) {
 		// End is zero
 	}
 
-	start, end, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF16)
+	start, end, ok := SpanToLSPRange(sources, span, PositionEncodingUTF16)
 	if !ok {
-		t.Fatal("lsputil.SpanToLSPRange(point span) = !ok; want ok")
+		t.Fatal("SpanToLSPRange(point span) = !ok; want ok")
 	}
 
 	// Extract values (fixed-size arrays, safe to index)
@@ -454,9 +452,9 @@ func TestSpanToLSPRange_NegativeLine(t *testing.T) {
 		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
 	}
 
-	start, _, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF16)
+	start, _, ok := SpanToLSPRange(sources, span, PositionEncodingUTF16)
 	if !ok {
-		t.Fatal("lsputil.SpanToLSPRange() = !ok; want ok")
+		t.Fatal("SpanToLSPRange() = !ok; want ok")
 	}
 
 	// Extract values (fixed-size array, safe to index)
@@ -491,9 +489,9 @@ func TestSpanToLSPRange_UnknownByte(t *testing.T) {
 		End:    location.Position{Line: 1, Column: 12, Byte: -1},
 	}
 
-	start, end, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF16)
+	start, end, ok := SpanToLSPRange(sources, span, PositionEncodingUTF16)
 	if !ok {
-		t.Fatal("lsputil.SpanToLSPRange() = !ok; want ok")
+		t.Fatal("SpanToLSPRange() = !ok; want ok")
 	}
 
 	startLine, startChar := start[0], start[1]
@@ -535,9 +533,9 @@ func TestSpanToLSPRange_MixedByteKnowledge(t *testing.T) {
 		End:    location.Position{Line: 1, Column: 6, Byte: -1}, // Unknown byte
 	}
 
-	start, end, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF16)
+	start, end, ok := SpanToLSPRange(sources, span, PositionEncodingUTF16)
 	if !ok {
-		t.Fatal("lsputil.SpanToLSPRange() = !ok; want ok")
+		t.Fatal("SpanToLSPRange() = !ok; want ok")
 	}
 
 	startLine, startChar := start[0], start[1]
@@ -587,12 +585,12 @@ func TestByteOffsetFromLSP_UTF8_ClampsToEOL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := lsputil.ByteOffsetFromLSP(sources, sourceID, tt.line, tt.char, PositionEncodingUTF8)
+			got, ok := ByteOffsetFromLSP(sources, sourceID, tt.line, tt.char, PositionEncodingUTF8)
 			if !ok {
 				t.Fatal("ByteOffsetFromLSP returned ok=false")
 			}
 			if got != tt.wantByte {
-				t.Errorf("lsputil.ByteOffsetFromLSP(line=%d, char=%d, UTF8) = %d; want %d",
+				t.Errorf("ByteOffsetFromLSP(line=%d, char=%d, UTF8) = %d; want %d",
 					tt.line, tt.char, got, tt.wantByte)
 			}
 		})
@@ -611,13 +609,13 @@ func TestByteOffsetFromLSP_UTF8_LastLineNoNewline(t *testing.T) {
 	}
 
 	// Line 2 (0-based line 1) has no newline, should clamp to content end
-	got, ok := lsputil.ByteOffsetFromLSP(sources, sourceID, 1, 100, PositionEncodingUTF8)
+	got, ok := ByteOffsetFromLSP(sources, sourceID, 1, 100, PositionEncodingUTF8)
 	if !ok {
 		t.Fatal("ByteOffsetFromLSP returned ok=false")
 	}
 	// Content length is 7, so should clamp to 7
 	if got != 7 {
-		t.Errorf("lsputil.ByteOffsetFromLSP(line=1, char=100, UTF8, no trailing newline) = %d; want 7", got)
+		t.Errorf("ByteOffsetFromLSP(line=1, char=100, UTF8, no trailing newline) = %d; want 7", got)
 	}
 }
 
@@ -646,9 +644,9 @@ func TestClampToLineEnd(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := lsputil.ClampToLineEnd(content, tt.lineStart, tt.offset)
+			got := ClampToLineEnd(content, tt.lineStart, tt.offset)
 			if got != tt.want {
-				t.Errorf("lsputil.ClampToLineEnd(lineStart=%d, offset=%d) = %d; want %d",
+				t.Errorf("ClampToLineEnd(lineStart=%d, offset=%d) = %d; want %d",
 					tt.lineStart, tt.offset, got, tt.want)
 			}
 		})
@@ -675,9 +673,9 @@ func TestClampToLineEnd_NoNewline(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := lsputil.ClampToLineEnd(content, tt.lineStart, tt.offset)
+			got := ClampToLineEnd(content, tt.lineStart, tt.offset)
 			if got != tt.want {
-				t.Errorf("lsputil.ClampToLineEnd(offset=%d) = %d; want %d",
+				t.Errorf("ClampToLineEnd(offset=%d) = %d; want %d",
 					tt.offset, got, tt.want)
 			}
 		})
@@ -706,9 +704,9 @@ func TestSpanToLSPRange_UTF8_ASCII(t *testing.T) {
 		End:    location.Position{Line: 1, Column: 9, Byte: 8}, // "Foo" ends at byte 8
 	}
 
-	start, end, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF8)
+	start, end, ok := SpanToLSPRange(sources, span, PositionEncodingUTF8)
 	if !ok {
-		t.Fatal("lsputil.SpanToLSPRange(UTF8) = !ok; want ok")
+		t.Fatal("SpanToLSPRange(UTF8) = !ok; want ok")
 	}
 
 	startLine, startChar := start[0], start[1]
@@ -748,9 +746,9 @@ func TestSpanToLSPRange_UTF8_MultibyteChars(t *testing.T) {
 		End:    location.Position{Line: 1, Column: 7, Byte: 6}, // after 'o' at byte 6
 	}
 
-	start, end, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF8)
+	start, end, ok := SpanToLSPRange(sources, span, PositionEncodingUTF8)
 	if !ok {
-		t.Fatal("lsputil.SpanToLSPRange(UTF8) = !ok; want ok")
+		t.Fatal("SpanToLSPRange(UTF8) = !ok; want ok")
 	}
 
 	startLine, startChar := start[0], start[1]
@@ -789,9 +787,9 @@ func TestSpanToLSPRange_UTF8_SecondLine(t *testing.T) {
 		End:    location.Position{Line: 2, Column: 4, Byte: 7}, // after 'f' at byte 7
 	}
 
-	start, end, ok := lsputil.SpanToLSPRange(sources, span, PositionEncodingUTF8)
+	start, end, ok := SpanToLSPRange(sources, span, PositionEncodingUTF8)
 	if !ok {
-		t.Fatal("lsputil.SpanToLSPRange(UTF8) = !ok; want ok")
+		t.Fatal("SpanToLSPRange(UTF8) = !ok; want ok")
 	}
 
 	startLine, startChar := start[0], start[1]

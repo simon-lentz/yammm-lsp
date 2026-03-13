@@ -1,20 +1,12 @@
-package lsp
+package format
 
 import (
-	"context"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
-
 	"github.com/simon-lentz/yammm/schema/load"
-
-	"github.com/simon-lentz/yammm-lsp/internal/format"
-	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 )
 
 func TestFormatDocument_NoChanges(t *testing.T) {
@@ -26,12 +18,12 @@ type Person {
 	name String required
 }
 `
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != input {
 		t.Errorf("formatDocument: expected no changes, got:\n%q", result)
 	}
 
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
@@ -46,17 +38,17 @@ func TestFormatDocument_TrailingWhitespace(t *testing.T) {
 	input := "schema \"test\"   \n\ntype Person {   \n\tname String required   \n}\n"
 	expected := "schema \"test\"\n\ntype Person {\n\tname String required\n}\n"
 
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != expected {
-		t.Errorf("format.FormatDocument() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatDocument() =\n%q\nwant:\n%q", result, expected)
 	}
 
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if tsResult != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -66,17 +58,17 @@ func TestFormatDocument_NormalizeCRLF(t *testing.T) {
 	input := "schema \"test\"\r\n\r\ntype Person {\r\n\tname String\r\n}\r\n"
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != expected {
-		t.Errorf("format.FormatDocument() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatDocument() =\n%q\nwant:\n%q", result, expected)
 	}
 
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if tsResult != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -86,17 +78,17 @@ func TestFormatDocument_NormalizeCR(t *testing.T) {
 	input := "schema \"test\"\r\rtype Person {\r\tname String\r}\r"
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != expected {
-		t.Errorf("format.FormatDocument() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatDocument() =\n%q\nwant:\n%q", result, expected)
 	}
 
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if tsResult != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -133,9 +125,9 @@ type Company {
 	title String
 }
 `
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != fdExpected {
-		t.Errorf("format.FormatDocument() =\n%q\nwant:\n%q", result, fdExpected)
+		t.Errorf("FormatDocument() =\n%q\nwant:\n%q", result, fdExpected)
 	}
 
 	// formatTokenStream collapses blank lines (Phase 2: max 1 blank between declarations)
@@ -149,12 +141,12 @@ type Company {
 	title String
 }
 `
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if tsResult != tsExpected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", tsResult, tsExpected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", tsResult, tsExpected)
 	}
 }
 
@@ -164,17 +156,17 @@ func TestFormatDocument_RemoveTrailingBlankLines(t *testing.T) {
 	input := "schema \"test\"\n\ntype Person {\n\tname String\n}\n\n\n\n"
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != expected {
-		t.Errorf("format.FormatDocument() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatDocument() =\n%q\nwant:\n%q", result, expected)
 	}
 
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if tsResult != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -184,17 +176,17 @@ func TestFormatDocument_EnsureTrailingNewline(t *testing.T) {
 	input := "schema \"test\"\n\ntype Person {\n\tname String\n}"
 	expected := "schema \"test\"\n\ntype Person {\n\tname String\n}\n"
 
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != expected {
-		t.Errorf("format.FormatDocument() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatDocument() =\n%q\nwant:\n%q", result, expected)
 	}
 
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if tsResult != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -208,12 +200,12 @@ type Person {
 	name String // inline comment
 }
 `
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != input {
 		t.Errorf("formatDocument: comments should be preserved, got:\n%q", result)
 	}
 
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
@@ -233,7 +225,7 @@ type Person {
 	--> EMPLOYER (one) Company
 }
 `
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != input {
 		t.Errorf("formatDocument: indentation should be preserved, got:\n%q", result)
 	}
@@ -247,12 +239,12 @@ type Person {
 	--> EMPLOYER (one) Company
 }
 `
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if tsResult != tsExpected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", tsResult, tsExpected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", tsResult, tsExpected)
 	}
 }
 
@@ -260,7 +252,7 @@ func TestFormatDocument_Empty(t *testing.T) {
 	t.Parallel()
 
 	input := ""
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 
 	if result != "" {
 		t.Errorf("empty input should return empty output, got: %q", result)
@@ -271,7 +263,7 @@ func TestFormatDocument_OnlyWhitespace(t *testing.T) {
 	t.Parallel()
 
 	input := "   \n\t\n   \n"
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 
 	if result != "" {
 		t.Errorf("whitespace-only input should return empty, got: %q", result)
@@ -294,18 +286,18 @@ type Person {
 `
 
 	// formatDocument idempotency
-	first := format.FormatDocument(input)
-	second := format.FormatDocument(first)
+	first := FormatDocument(input)
+	second := FormatDocument(first)
 	if first != second {
 		t.Errorf("formatDocument should be idempotent:\nfirst:\n%q\nsecond:\n%q", first, second)
 	}
 
 	// formatTokenStream idempotency
-	tsFirst, err := format.FormatTokenStream(input)
+	tsFirst, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream first pass returned error: %v", err)
 	}
-	tsSecond, err := format.FormatTokenStream(tsFirst)
+	tsSecond, err := FormatTokenStream(tsFirst)
 	if err != nil {
 		t.Fatalf("formatTokenStream second pass returned error: %v", err)
 	}
@@ -363,9 +355,9 @@ type Car extends Vehicle {
 	*-> WHEELS (many) parts.Wheel
 }
 `
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != fdExpected {
-		t.Errorf("format.FormatDocument() =\n%q\nwant:\n%q", result, fdExpected)
+		t.Errorf("FormatDocument() =\n%q\nwant:\n%q", result, fdExpected)
 	}
 
 	// formatTokenStream collapses double blanks to single
@@ -386,12 +378,12 @@ type Car extends Vehicle {
 	*-> WHEELS (many) parts.Wheel
 }
 `
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if tsResult != tsExpected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", tsResult, tsExpected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", tsResult, tsExpected)
 	}
 }
 
@@ -421,13 +413,13 @@ type Address {
 type Email = Pattern["^.+@.+$"]
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -455,13 +447,13 @@ type RuleSet {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 
 	if !strings.Contains(result, `! "must_be_enabled" !disabled && active`) {
@@ -496,13 +488,13 @@ type Person {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -539,12 +531,12 @@ type Company {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -566,12 +558,12 @@ type Person {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -594,12 +586,12 @@ type Person {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -622,12 +614,12 @@ type Person {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -646,12 +638,12 @@ type Person {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -674,12 +666,12 @@ type Person {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -697,12 +689,12 @@ type T {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != input {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, input)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, input)
 	}
 }
 
@@ -721,12 +713,12 @@ type Company {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != input {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, input)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, input)
 	}
 }
 
@@ -743,12 +735,12 @@ type Person {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != input {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, input)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, input)
 	}
 }
 
@@ -776,50 +768,50 @@ type T {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
 func TestFormatTokenStream_GoldenFile(t *testing.T) {
 	t.Parallel()
 
-	unformatted, err := os.ReadFile("testdata/lsp/formatting/unformatted.yammm")
+	unformatted, err := os.ReadFile("../../testdata/lsp/formatting/unformatted.yammm")
 	if err != nil {
 		t.Fatalf("failed to read unformatted fixture: %v", err)
 	}
-	golden, err := os.ReadFile("testdata/lsp/formatting/formatted.yammm.golden")
+	golden, err := os.ReadFile("../../testdata/lsp/formatting/formatted.yammm.golden")
 	if err != nil {
 		t.Fatalf("failed to read golden fixture: %v", err)
 	}
 
-	result, err := format.FormatTokenStream(string(unformatted))
+	result, err := FormatTokenStream(string(unformatted))
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != string(golden) {
-		t.Errorf("format.FormatTokenStream(unformatted) !=golden\ngot:\n%q\nwant:\n%q", result, string(golden))
+		t.Errorf("FormatTokenStream(unformatted) !=golden\ngot:\n%q\nwant:\n%q", result, string(golden))
 	}
 }
 
 func TestFormatTokenStream_GoldenIdempotent(t *testing.T) {
 	t.Parallel()
 
-	golden, err := os.ReadFile("testdata/lsp/formatting/formatted.yammm.golden")
+	golden, err := os.ReadFile("../../testdata/lsp/formatting/formatted.yammm.golden")
 	if err != nil {
 		t.Fatalf("failed to read golden fixture: %v", err)
 	}
 
-	result, err := format.FormatTokenStream(string(golden))
+	result, err := FormatTokenStream(string(golden))
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != string(golden) {
-		t.Errorf("format.FormatTokenStream(golden) != golden\ngot:\n%q\nwant:\n%q", result, string(golden))
+		t.Errorf("FormatTokenStream(golden) != golden\ngot:\n%q\nwant:\n%q", result, string(golden))
 	}
 }
 
@@ -838,8 +830,8 @@ func TestFormatTokenStream_GoldenFixtures(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			inputPath := filepath.Join("testdata", "lsp", "formatting", name+".yammm")
-			goldenPath := filepath.Join("testdata", "lsp", "formatting", name+".yammm.golden")
+			inputPath := filepath.Join("../../testdata", "lsp", "formatting", name+".yammm")
+			goldenPath := filepath.Join("../../testdata", "lsp", "formatting", name+".yammm.golden")
 
 			input, err := os.ReadFile(inputPath)
 			if err != nil {
@@ -850,12 +842,12 @@ func TestFormatTokenStream_GoldenFixtures(t *testing.T) {
 				t.Fatalf("failed to read golden %s: %v", name, err)
 			}
 
-			result, err := format.FormatTokenStream(string(input))
+			result, err := FormatTokenStream(string(input))
 			if err != nil {
 				t.Fatalf("formatTokenStream returned error: %v", err)
 			}
 			if result != string(golden) {
-				t.Errorf("format.FormatTokenStream(%s) != golden\ngot:\n%s\nwant:\n%s", name, result, string(golden))
+				t.Errorf("FormatTokenStream(%s) != golden\ngot:\n%s\nwant:\n%s", name, result, string(golden))
 			}
 		})
 	}
@@ -877,18 +869,18 @@ func TestFormatTokenStream_GoldenIdempotentAll(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			goldenPath := filepath.Join("testdata", "lsp", "formatting", name)
+			goldenPath := filepath.Join("../../testdata", "lsp", "formatting", name)
 			golden, err := os.ReadFile(goldenPath)
 			if err != nil {
 				t.Fatalf("failed to read golden %s: %v", name, err)
 			}
 
-			result, err := format.FormatTokenStream(string(golden))
+			result, err := FormatTokenStream(string(golden))
 			if err != nil {
 				t.Fatalf("formatTokenStream returned error: %v", err)
 			}
 			if result != string(golden) {
-				t.Errorf("format.FormatTokenStream(%s) not idempotent\ngot:\n%s\nwant:\n%s", name, result, string(golden))
+				t.Errorf("FormatTokenStream(%s) not idempotent\ngot:\n%s\nwant:\n%s", name, result, string(golden))
 			}
 		})
 	}
@@ -941,12 +933,12 @@ type Concrete extends Base {
 
 `
 
-	first, err := format.FormatTokenStream(input)
+	first, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream first pass returned error: %v", err)
 	}
 
-	second, err := format.FormatTokenStream(first)
+	second, err := FormatTokenStream(first)
 	if err != nil {
 		t.Fatalf("formatTokenStream second pass returned error: %v", err)
 	}
@@ -967,12 +959,12 @@ type   Person{
 }
 `
 
-	first, err := format.FormatTokenStream(input)
+	first, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream first pass returned error: %v", err)
 	}
 
-	second, err := format.FormatTokenStream(first)
+	second, err := FormatTokenStream(first)
 	if err != nil {
 		t.Fatalf("formatTokenStream second pass returned error: %v", err)
 	}
@@ -991,7 +983,7 @@ type Person {
 	name String
 `
 
-	_, err := format.FormatTokenStream(input)
+	_, err := FormatTokenStream(input)
 	if err == nil {
 		t.Fatal("expected formatTokenStream to return error for malformed input")
 	}
@@ -1017,12 +1009,12 @@ type T {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1048,12 +1040,12 @@ type T {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1079,12 +1071,12 @@ type T {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1120,12 +1112,12 @@ type Concrete extends Base, Auditable {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1159,12 +1151,12 @@ type T {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1241,12 +1233,12 @@ type T {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result, err := format.FormatTokenStream(tt.input)
+			result, err := FormatTokenStream(tt.input)
 			if err != nil {
 				t.Fatalf("formatTokenStream returned error: %v", err)
 			}
 			if result != tt.expected {
-				t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, tt.expected)
+				t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, tt.expected)
 			}
 		})
 	}
@@ -1273,12 +1265,12 @@ type T {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1299,57 +1291,12 @@ type T {
 }
 `
 
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if result != expected {
-		t.Errorf("format.FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
-	}
-}
-
-func TestFormatting_UsesTokenStreamFormatterForIntraLineSpacing(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	content := "schema \"test\"\n\ntype   A{\n\tname String\n}\n"
-	filePath := filepath.Join(tmpDir, "test.yammm")
-	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
-		t.Fatalf("failed to write file: %v", err)
-	}
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := NewServer(logger, Config{ModuleRoot: tmpDir})
-	uri := lsputil.PathToURI(filePath)
-
-	if err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{
-			URI:        uri,
-			LanguageID: "yammm",
-			Version:    1,
-			Text:       content,
-		},
-	}); err != nil {
-		t.Fatalf("textDocumentDidOpen failed: %v", err)
-	}
-
-	edits, err := server.textDocumentFormatting(context.TODO(), &protocol.DocumentFormattingParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: uri},
-	})
-	if err != nil {
-		t.Fatalf("textDocumentFormatting failed: %v", err)
-	}
-
-	if len(edits) == 0 {
-		t.Fatal("expected formatting edits for intra-line spacing normalization")
-	}
-
-	edit := edits[0]
-	if edit.Range.Start.Line != 0 || edit.Range.Start.Character != 0 {
-		t.Errorf("edit range should start at 0,0; got %d,%d", edit.Range.Start.Line, edit.Range.Start.Character)
-	}
-	if !strings.Contains(edit.NewText, "type A {") {
-		t.Errorf("expected formatted text to normalize type spacing, got:\n%s", edit.NewText)
+		t.Errorf("FormatTokenStream() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1357,10 +1304,10 @@ func TestNormalizeIndentation_NoLeading(t *testing.T) {
 	t.Parallel()
 
 	input := "name String"
-	result := format.NormalizeIndentation(input)
+	result := NormalizeIndentation(input)
 
 	if result != input {
-		t.Errorf("format.NormalizeIndentation(%q) = %q; want %q", input, result, input)
+		t.Errorf("NormalizeIndentation(%q) = %q; want %q", input, result, input)
 	}
 }
 
@@ -1368,7 +1315,7 @@ func TestNormalizeIndentation_Tabs(t *testing.T) {
 	t.Parallel()
 
 	input := "\tname String"
-	result := format.NormalizeIndentation(input)
+	result := NormalizeIndentation(input)
 
 	if result != input {
 		t.Errorf("tabs should be preserved: %q", result)
@@ -1381,10 +1328,10 @@ func TestNormalizeIndentation_SpacesToTabs(t *testing.T) {
 	input := "    name String"  // 4 spaces
 	expected := "\tname String" // 1 tab
 
-	result := format.NormalizeIndentation(input)
+	result := NormalizeIndentation(input)
 
 	if result != expected {
-		t.Errorf("format.NormalizeIndentation(%q) = %q; want %q", input, result, expected)
+		t.Errorf("NormalizeIndentation(%q) = %q; want %q", input, result, expected)
 	}
 }
 
@@ -1394,10 +1341,10 @@ func TestNormalizeIndentation_MixedSpaces(t *testing.T) {
 	input := "      name String"  // 6 spaces
 	expected := "\t  name String" // 1 tab + 2 spaces
 
-	result := format.NormalizeIndentation(input)
+	result := NormalizeIndentation(input)
 
 	if result != expected {
-		t.Errorf("format.NormalizeIndentation(%q) = %q; want %q", input, result, expected)
+		t.Errorf("NormalizeIndentation(%q) = %q; want %q", input, result, expected)
 	}
 }
 
@@ -1405,7 +1352,7 @@ func TestNormalizeIndentation_Empty(t *testing.T) {
 	t.Parallel()
 
 	input := ""
-	result := format.NormalizeIndentation(input)
+	result := NormalizeIndentation(input)
 
 	if result != "" {
 		t.Errorf("empty input should return empty, got: %q", result)
@@ -1432,7 +1379,7 @@ type Person {
 }
 `
 
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != fdExpected {
 		t.Errorf("formatDocument: spaces should be converted to tabs:\ngot:\n%q\nwant:\n%q", result, fdExpected)
 	}
@@ -1445,7 +1392,7 @@ type Person {
 	age  Integer
 }
 `
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
@@ -1472,7 +1419,7 @@ type Person {
 }
 `
 
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != expectedLineByLine {
 		t.Errorf("formatDocument: mixed indent should be normalized:\ngot:\n%q\nwant:\n%q", result, expectedLineByLine)
 	}
@@ -1485,7 +1432,7 @@ type Person {
 }
 `
 
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
@@ -1517,17 +1464,17 @@ type User {
 }
 `
 
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != expected {
-		t.Errorf("format.FormatDocument() with CJK content:\ngot:\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatDocument() with CJK content:\ngot:\n%q\nwant:\n%q", result, expected)
 	}
 
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if tsResult != expected {
-		t.Errorf("format.FormatTokenStream() with CJK content:\ngot:\n%q\nwant:\n%q", tsResult, expected)
+		t.Errorf("FormatTokenStream() with CJK content:\ngot:\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -1548,17 +1495,17 @@ type User {
 }
 `
 
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != expected {
-		t.Errorf("format.FormatDocument() with emoji:\ngot:\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatDocument() with emoji:\ngot:\n%q\nwant:\n%q", result, expected)
 	}
 
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if tsResult != expected {
-		t.Errorf("format.FormatTokenStream() with emoji:\ngot:\n%q\nwant:\n%q", tsResult, expected)
+		t.Errorf("FormatTokenStream() with emoji:\ngot:\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -1590,17 +1537,17 @@ type MixedType {
 }
 `
 
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 	if result != expected {
-		t.Errorf("format.FormatDocument() with mixed content:\ngot:\n%q\nwant:\n%q", result, expected)
+		t.Errorf("FormatDocument() with mixed content:\ngot:\n%q\nwant:\n%q", result, expected)
 	}
 
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
 	if tsResult != expected {
-		t.Errorf("format.FormatTokenStream() with mixed content:\ngot:\n%q\nwant:\n%q", tsResult, expected)
+		t.Errorf("FormatTokenStream() with mixed content:\ngot:\n%q\nwant:\n%q", tsResult, expected)
 	}
 }
 
@@ -1616,7 +1563,7 @@ type JapaneseUser {
 }
 `
 
-	result := format.FormatDocument(input)
+	result := FormatDocument(input)
 
 	// Verify formatDocument result is still valid YAMMM
 	ctx := t.Context()
@@ -1635,7 +1582,7 @@ type JapaneseUser {
 	}
 
 	// Verify formatTokenStream result is also parseable
-	tsResult, err := format.FormatTokenStream(input)
+	tsResult, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
@@ -1671,10 +1618,10 @@ type 用戶 {
 `
 
 	// Format once
-	first := format.FormatDocument(input)
+	first := FormatDocument(input)
 
 	// Format again
-	second := format.FormatDocument(first)
+	second := FormatDocument(first)
 
 	if first != second {
 		t.Errorf("formatting multibyte content should be idempotent:\nfirst:\n%q\nsecond:\n%q", first, second)
@@ -1683,92 +1630,15 @@ type 用戶 {
 
 // TestFormatting_UTF8PositionEncoding verifies that formatting respects
 // the negotiated position encoding (UTF-8 vs UTF-16).
-func TestFormatting_UTF8PositionEncoding(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-
-	// Create a schema file with CJK characters that needs formatting.
-	// In UTF-8 mode, the edit range's Character field should be byte count.
-	// In UTF-16 mode, it should be UTF-16 code units.
-	// CJK characters are 3 bytes in UTF-8 but 1 UTF-16 code unit each.
-	content := "schema \"日本語\"\n\ntype Person {    \n\tname String\n}\n"
-	filePath := filepath.Join(tmpDir, "test.yammm")
-	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
-		t.Fatalf("failed to write file: %v", err)
-	}
-
-	// Test both encodings
-	tests := []struct {
-		name     string
-		encoding PositionEncoding
-	}{
-		{"UTF-16", PositionEncodingUTF16},
-		{"UTF-8", PositionEncodingUTF8},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			server := NewServer(logger, Config{ModuleRoot: tmpDir})
-
-			// Set position encoding
-			server.workspace.SetPositionEncoding(tt.encoding)
-
-			// Open the document
-			uri := lsputil.PathToURI(filePath)
-			err := server.textDocumentDidOpen(context.TODO(), &protocol.DidOpenTextDocumentParams{
-				TextDocument: protocol.TextDocumentItem{
-					URI:        uri,
-					LanguageID: "yammm",
-					Version:    1,
-					Text:       content,
-				},
-			})
-			if err != nil {
-				t.Fatalf("textDocumentDidOpen failed: %v", err)
-			}
-
-			// Request formatting
-			edits, err := server.textDocumentFormatting(context.TODO(), &protocol.DocumentFormattingParams{
-				TextDocument: protocol.TextDocumentIdentifier{URI: uri},
-			})
-			if err != nil {
-				t.Fatalf("textDocumentFormatting failed: %v", err)
-			}
-
-			if len(edits) == 0 {
-				// document doesn't need formatting (trailing spaces removed in formatDocument)
-				// This is acceptable - the test just verifies no crash with encoding switch
-				return
-			}
-
-			// Verify the edit range covers the document (starts at 0,0)
-			edit := edits[0]
-			if edit.Range.Start.Line != 0 || edit.Range.Start.Character != 0 {
-				t.Errorf("edit range should start at 0,0; got %d,%d",
-					edit.Range.Start.Line, edit.Range.Start.Character)
-			}
-
-			// For UTF-8, the character should be byte offset (larger for multi-byte chars)
-			// For UTF-16, the character should be code units (smaller for BMP chars)
-			// The test primarily verifies that the call completes without panic
-			// and returns a valid edit when the encoding is switched
-		})
-	}
-}
-
 func TestAlignColumns_PropertyNamePadding(t *testing.T) {
 	t.Parallel()
 
 	input := "\tname String required\n\tage Integer\n\tscore Float[0.0, 100.0]\n"
 	expected := "\tname  String required\n\tage   Integer\n\tscore Float[0.0, 100.0]\n"
 
-	result := format.AlignColumns(input)
+	result := AlignColumns(input)
 	if result != expected {
-		t.Errorf("format.AlignColumns() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("AlignColumns() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1782,9 +1652,9 @@ func TestAlignColumns_PropertyInlineCommentAlignment(t *testing.T) {
 	// comment col = 21 + 1 = 22
 	expected := "\tname String required // the name\n\tage  Integer         // age\n"
 
-	result := format.AlignColumns(input)
+	result := AlignColumns(input)
 	if result != expected {
-		t.Errorf("format.AlignColumns() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("AlignColumns() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1795,9 +1665,9 @@ func TestAlignColumns_RelationshipNamePadding(t *testing.T) {
 	// REL(3), REL2(4), REL3(4) → max 4
 	expected := "\t--> REL  (_:many) Target\n\t--> REL2 (_:one) Target\n\t*-> REL3 (one:many) Target\n"
 
-	result := format.AlignColumns(input)
+	result := AlignColumns(input)
 	if result != expected {
-		t.Errorf("format.AlignColumns() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("AlignColumns() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1808,9 +1678,9 @@ func TestAlignColumns_AliasNamePadding(t *testing.T) {
 	// Email(5), StateFP(7) → max 7
 	expected := "type Email   = Pattern[\"^.+@.+$\"]\ntype StateFP = String[2, 2]\n"
 
-	result := format.AlignColumns(input)
+	result := AlignColumns(input)
 	if result != expected {
-		t.Errorf("format.AlignColumns() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("AlignColumns() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1821,9 +1691,9 @@ func TestAlignColumns_GroupBreakAtBlankLine(t *testing.T) {
 	// Blank line splits into two singleton groups → no alignment
 	expected := "\tname String\n\n\tage Integer\n"
 
-	result := format.AlignColumns(input)
+	result := AlignColumns(input)
 	if result != expected {
-		t.Errorf("format.AlignColumns() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("AlignColumns() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1834,9 +1704,9 @@ func TestAlignColumns_GroupBreakAtComment(t *testing.T) {
 	// Comment-only line splits properties into separate groups
 	expected := "\tname String\n\t// standalone comment\n\tage Integer\n"
 
-	result := format.AlignColumns(input)
+	result := AlignColumns(input)
 	if result != expected {
-		t.Errorf("format.AlignColumns() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("AlignColumns() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1848,9 +1718,9 @@ func TestAlignColumns_GroupBreakAtKindChange(t *testing.T) {
 	// Then kind change → relationships: REL(3), REL2(4) → max 4
 	expected := "\tname String\n\tage  Integer\n\t--> REL  (one) Target\n\t--> REL2 (many) Target\n"
 
-	result := format.AlignColumns(input)
+	result := AlignColumns(input)
 	if result != expected {
-		t.Errorf("format.AlignColumns() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("AlignColumns() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1862,9 +1732,9 @@ func TestAlignColumns_MultilineBreaksGroup(t *testing.T) {
 	// name and age are in separate groups (multiline in between)
 	expected := "\tname String\n\tstatus Enum[\n\t\t\"a\",\n\t\t\"b\"\n\t]\n\tage Integer\n"
 
-	result := format.AlignColumns(input)
+	result := AlignColumns(input)
 	if result != expected {
-		t.Errorf("format.AlignColumns() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("AlignColumns() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1876,9 +1746,9 @@ func TestAlignColumns_EdgePropertyBlockAlignment(t *testing.T) {
 	// Edge block: weight(6), score(5) → max 6
 	expected := "\t--> REL (one) Target {\n\t\tweight Float required\n\t\tscore  Integer\n\t}\n"
 
-	result := format.AlignColumns(input)
+	result := AlignColumns(input)
 	if result != expected {
-		t.Errorf("format.AlignColumns() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("AlignColumns() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1888,9 +1758,9 @@ func TestAlignColumns_SingleMemberNoChange(t *testing.T) {
 	input := "\tname String required\n"
 	expected := "\tname String required\n"
 
-	result := format.AlignColumns(input)
+	result := AlignColumns(input)
 	if result != expected {
-		t.Errorf("format.AlignColumns() =\n%q\nwant:\n%q", result, expected)
+		t.Errorf("AlignColumns() =\n%q\nwant:\n%q", result, expected)
 	}
 }
 
@@ -1905,8 +1775,8 @@ func TestAlignColumns_Idempotent(t *testing.T) {
 	}
 
 	for _, input := range inputs {
-		first := format.AlignColumns(input)
-		second := format.AlignColumns(first)
+		first := AlignColumns(input)
+		second := AlignColumns(first)
 		if first != second {
 			t.Errorf("alignColumns not idempotent for input:\n%q\nfirst:\n%q\nsecond:\n%q", input, first, second)
 		}
@@ -1917,13 +1787,13 @@ func TestAlignColumns_EmptyAndPassthrough(t *testing.T) {
 	t.Parallel()
 
 	// Empty string
-	if result := format.AlignColumns(""); result != "" {
+	if result := AlignColumns(""); result != "" {
 		t.Errorf("empty input should return empty, got: %q", result)
 	}
 
 	// Non-alignable content passes through unchanged
 	nonAlignable := "schema \"test\"\n\n// comment\n! \"msg\" expr\n}\n"
-	if result := format.AlignColumns(nonAlignable); result != nonAlignable {
+	if result := AlignColumns(nonAlignable); result != nonAlignable {
 		t.Errorf("non-alignable input should pass through unchanged:\ngot:\n%q\nwant:\n%q", result, nonAlignable)
 	}
 }
@@ -1949,9 +1819,9 @@ func TestDisplayWidth(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := format.DisplayWidth(tt.input)
+			got := DisplayWidth(tt.input)
 			if got != tt.want {
-				t.Errorf("format.DisplayWidth(%q) = %d; want %d", tt.input, got, tt.want)
+				t.Errorf("DisplayWidth(%q) = %d; want %d", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -1964,7 +1834,7 @@ func TestWrapLongLines_ShortEnumUnchanged(t *testing.T) {
 
 	// Short Enum (well under 100 chars) should pass through unchanged
 	input := "\tstatus Enum[\"active\", \"inactive\"] required\n"
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 	if result != input {
 		t.Errorf("short Enum should be unchanged:\ngot:\n%q\nwant:\n%q", result, input)
 	}
@@ -1975,11 +1845,11 @@ func TestWrapLongLines_LongEnumWraps(t *testing.T) {
 
 	// Build a long Enum that exceeds 100 chars
 	input := "\tstatus Enum[\"pending_review\", \"approved\", \"rejected\", \"needs_revision\", \"escalated\", \"archived\", \"deleted\"] required\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		t.Fatal("test input should exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	// Should be wrapped: Enum[ on first line, values indented, ] with modifier
 	if !strings.Contains(result, "Enum[\n") {
@@ -2001,7 +1871,7 @@ func TestWrapLongLines_EnumCollapseToSingleLine(t *testing.T) {
 
 	// Multiline Enum that would fit on a single line
 	input := "\tstatus Enum[\n\t\t\"a\",\n\t\t\"b\",\n\t] required\n"
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	// Should be collapsed to single line (no trailing comma in single-line form)
 	expected := "\tstatus Enum[\"a\", \"b\"] required\n"
@@ -2016,7 +1886,7 @@ func TestWrapLongLines_EnumCollapseStillLong(t *testing.T) {
 	// Multiline Enum that's still too long when collapsed → re-canonicalize
 	input := "\tstatus Enum[\n\t\t\"pending_review\",\n\t\t\"approved\",\n\t\t\"rejected\",\n\t\t\"needs_revision\",\n\t\t\"escalated\",\n\t\t\"archived\",\n\t\t\"deleted\",\n\t] required\n"
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	// Should stay multiline with canonical form
 	if !strings.Contains(result, "Enum[\n") {
@@ -2032,9 +1902,9 @@ func TestWrapLongLines_EnumEscapedQuotes(t *testing.T) {
 
 	// Values with escaped quotes should not break the parser
 	input := "\tval Enum[\"say \\\"hello\\\"\", \"say \\\"bye\\\"\", \"normal\", \"another\", \"more_values\", \"extra_long_value_here\", \"padding_it\"] required\n"
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) > format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) > LineWidthThreshold {
 		// Should be wrapped
 		if !strings.Contains(result, "Enum[\n") {
 			t.Errorf("long Enum with escaped quotes should wrap:\n%s", result)
@@ -2051,11 +1921,11 @@ func TestWrapLongLines_EnumInlineComment(t *testing.T) {
 
 	// Enum with inline comment — comment should reattach to ] line
 	input := "\tstatus Enum[\"pending_review\", \"approved\", \"rejected\", \"needs_revision\", \"escalated\", \"archived\"] required // status field\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		t.Fatal("test input should exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	// Comment should be on the closing line
 	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
@@ -2071,7 +1941,7 @@ func TestWrapLongLines_ShortExtendsUnchanged(t *testing.T) {
 	t.Parallel()
 
 	input := "type Concrete extends Base, Audit {\n"
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 	if result != input {
 		t.Errorf("short extends should be unchanged:\ngot:\n%q\nwant:\n%q", result, input)
 	}
@@ -2081,11 +1951,11 @@ func TestWrapLongLines_LongExtendsWraps(t *testing.T) {
 	t.Parallel()
 
 	input := "type ComplexEntity extends Auditable, Trackable, Validatable, Serializable, Cacheable, Observable, Publishable {\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		t.Fatal("test input should exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	if !strings.Contains(result, "type ComplexEntity extends\n") {
 		t.Errorf("expected header on first line:\n%s", result)
@@ -2109,7 +1979,7 @@ func TestWrapLongLines_ExtendsCollapseToSingleLine(t *testing.T) {
 
 	// Multiline extends that fits on one line
 	input := "type Concrete extends\n\tBase,\n\tAudit,\n{\n"
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	expected := "type Concrete extends Base, Audit {\n"
 	if result != expected {
@@ -2122,7 +1992,7 @@ func TestWrapLongLines_ExtendsCollapseStillLong(t *testing.T) {
 
 	// Multiline extends that's still too long when collapsed
 	input := "type ComplexEntity extends\n\tAuditable,\n\tTrackable,\n\tValidatable,\n\tSerializable,\n\tCacheable,\n\tObservable,\n\tPublishable,\n{\n"
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	// Should stay multiline
 	if !strings.Contains(result, "type ComplexEntity extends\n") {
@@ -2138,11 +2008,11 @@ func TestWrapLongLines_ExtendsQualifiedTypes(t *testing.T) {
 
 	// Extends with qualified types (base.Type)
 	input := "type ComplexEntity extends base.Auditable, other.Trackable, third.Validatable, fourth.Serializable, fifth.Cacheable {\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		t.Fatal("test input should exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	if !strings.Contains(result, "\tbase.Auditable,\n") {
 		t.Errorf("qualified types should be preserved:\n%s", result)
@@ -2156,12 +2026,12 @@ func TestWrapLongLines_ExtendsAbstractType(t *testing.T) {
 	t.Parallel()
 
 	input := "abstract type ComplexEntity extends Auditable, Trackable, Validatable, Serializable, Cacheable, Observable {\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		// This is 108 chars with "abstract " prefix — should exceed threshold
 		t.Fatal("test input should exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	if !strings.Contains(result, "abstract type ComplexEntity extends\n") {
 		t.Errorf("abstract prefix should be preserved:\n%s", result)
@@ -2174,7 +2044,7 @@ func TestWrapLongLines_ShortDatatypeAliasUnchanged(t *testing.T) {
 	t.Parallel()
 
 	input := "type Status = Enum[\"active\", \"inactive\"]\n"
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 	if result != input {
 		t.Errorf("short alias should be unchanged:\ngot:\n%q\nwant:\n%q", result, input)
 	}
@@ -2184,11 +2054,11 @@ func TestWrapLongLines_LongDatatypeAliasWraps(t *testing.T) {
 	t.Parallel()
 
 	input := "type DeactivatedReason = Enum[\"removed_from_source\", \"matured\", \"merged\", \"manual\", \"superseded\", \"error_corrected\"]\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		t.Fatal("test input should exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	if !strings.Contains(result, "= Enum[\n") {
 		t.Errorf("expected Enum[ on first line:\n%s", result)
@@ -2203,7 +2073,7 @@ func TestWrapLongLines_DatatypeAliasCollapses(t *testing.T) {
 
 	// Multiline alias that fits on one line
 	input := "type Status = Enum[\n\t\"a\",\n\t\"b\",\n]\n"
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	expected := "type Status = Enum[\"a\", \"b\"]\n"
 	if result != expected {
@@ -2217,7 +2087,7 @@ func TestWrapLongLines_ShortInvariantUnchanged(t *testing.T) {
 	t.Parallel()
 
 	input := "\t! \"check\" a > 0 && b < 100\n"
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 	if result != input {
 		t.Errorf("short invariant should be unchanged:\ngot:\n%q\nwant:\n%q", result, input)
 	}
@@ -2227,11 +2097,11 @@ func TestWrapLongLines_LongInvariantWrapsAtOr(t *testing.T) {
 	t.Parallel()
 
 	input := "\t! \"geo_check\" (geo_type == \"state\" && Len(geoid) == 2) || (geo_type == \"county\" && Len(geoid) == 5) || (geo_type == \"place\" && Len(geoid) == 7)\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		t.Fatal("test input should exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	// First line should be just the prefix
 	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
@@ -2251,11 +2121,11 @@ func TestWrapLongLines_LongInvariantWrapsAtAnd(t *testing.T) {
 	t.Parallel()
 
 	input := "\t! \"complex_check\" very_long_field_name_one == \"expected_value_one\" && very_long_field_name_two == \"expected_value_two\" && third_field > 0\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		t.Fatal("test input should exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
 	if len(lines) < 3 {
@@ -2275,7 +2145,7 @@ func TestWrapLongLines_InvariantNeverCollapse(t *testing.T) {
 
 	// Multiline invariant should pass through unchanged — never collapse
 	input := "\t! \"check\"\n\t\ta > 0 &&\n\t\tb < 100\n"
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 	if result != input {
 		t.Errorf("multiline invariant should not be collapsed:\ngot:\n%q\nwant:\n%q", result, input)
 	}
@@ -2286,11 +2156,11 @@ func TestWrapLongLines_InvariantNestedOpsSkipped(t *testing.T) {
 
 	// && inside () should NOT be a wrap point — only top-level operators
 	input := "\t! \"check\" (very_long_condition_name && another_very_long_condition_name) || (yet_another_long_condition && final_long_condition_name)\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		t.Fatal("test input should exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	// Should wrap at || but NOT at && inside parens
 	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
@@ -2318,11 +2188,11 @@ func TestWrapLongLines_InvariantNoTopLevelOps(t *testing.T) {
 
 	// Very long invariant with no top-level && or || → left as-is
 	input := "\t! \"check\" Len(very_long_field_name_that_makes_line_exceed_one_hundred_characters_by_quite_a_bit_actually) > 0\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		t.Fatal("test input should exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	// Should pass through unchanged (no operators to wrap at)
 	if result != input {
@@ -2335,7 +2205,7 @@ func TestWrapLongLines_InvariantBraceExprPreserved(t *testing.T) {
 
 	// && inside { } braces (lambdas) should not be wrap points
 	input := "\t! \"all_valid\" ITEMS -> All |$item| { $item.qty > 0 && $item.price > 0 }\n"
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	// Under 100 chars, should pass through unchanged
 	if result != input {
@@ -2348,11 +2218,11 @@ func TestWrapLongLines_InvariantBracketExprPreserved(t *testing.T) {
 
 	// && and || inside [] (list literals) should NOT be top-level wrap points
 	input := "\t! \"list_logic\" value in [cond_a && cond_b, cond_c || cond_d] || very_long_field_name_that_pushes_past_the_one_hundred_character_threshold > 0\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		t.Fatal("test input should exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	// Should wrap at the top-level || but NOT at && or || inside brackets
 	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
@@ -2374,11 +2244,11 @@ func TestWrapLongLines_InvariantRegexLiteralPreserved(t *testing.T) {
 
 	// || inside /regex/ must NOT be treated as a top-level wrap point
 	input := "\t! \"pattern_check\" field =~ /very_long_pattern_foo||bar_baz_qux/ && other_very_long_field_name_exceeding_threshold > 0\n"
-	if format.DisplayWidth(strings.TrimSuffix(input, "\n")) <= format.LineWidthThreshold {
+	if DisplayWidth(strings.TrimSuffix(input, "\n")) <= LineWidthThreshold {
 		t.Fatal("test input must exceed threshold")
 	}
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 
 	for line := range strings.SplitSeq(strings.TrimSuffix(result, "\n"), "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -2396,7 +2266,7 @@ func TestWrapLongLines_NonWrappable(t *testing.T) {
 	// Long Pattern or long string — not wrappable, left as-is
 	input := "\tregex Pattern[\"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}$\"] required // this is a very very long line that exceeds\n"
 
-	result := format.WrapLongLines(input)
+	result := WrapLongLines(input)
 	if result != input {
 		t.Errorf("non-wrappable line should pass through:\ngot:\n%q\nwant:\n%q", result, input)
 	}
@@ -2423,8 +2293,8 @@ func TestWrapLongLines_Idempotent(t *testing.T) {
 	}
 
 	for _, input := range inputs {
-		first := format.WrapLongLines(input)
-		second := format.WrapLongLines(first)
+		first := WrapLongLines(input)
+		second := WrapLongLines(first)
 		if first != second {
 			t.Errorf("wrapLongLines not idempotent for input:\n%q\nfirst:\n%q\nsecond:\n%q", input, first, second)
 		}
@@ -2435,13 +2305,13 @@ func TestWrapLongLines_EmptyAndPassthrough(t *testing.T) {
 	t.Parallel()
 
 	// Empty string
-	if result := format.WrapLongLines(""); result != "" {
+	if result := WrapLongLines(""); result != "" {
 		t.Errorf("empty input should return empty, got: %q", result)
 	}
 
 	// Non-wrappable content passes through unchanged
 	input := "schema \"test\"\n\ntype T {\n\tname String\n}\n"
-	if result := format.WrapLongLines(input); result != input {
+	if result := WrapLongLines(input); result != input {
 		t.Errorf("short content should pass through:\ngot:\n%q\nwant:\n%q", result, input)
 	}
 }
@@ -2453,11 +2323,11 @@ func TestWrapLongLines_ExactlyAtThreshold(t *testing.T) {
 	// "\tstatus Enum[...]" — pad to exactly 100 display width
 	// Tab = 4, so we need 96 more chars after tab
 	line := "\t" + strings.Repeat("x", 96) + "\n"
-	if format.DisplayWidth(strings.TrimSuffix(line, "\n")) != 100 {
-		t.Fatalf("test line should be exactly 100 chars, got %d", format.DisplayWidth(strings.TrimSuffix(line, "\n")))
+	if DisplayWidth(strings.TrimSuffix(line, "\n")) != 100 {
+		t.Fatalf("test line should be exactly 100 chars, got %d", DisplayWidth(strings.TrimSuffix(line, "\n")))
 	}
 
-	result := format.WrapLongLines(line)
+	result := WrapLongLines(line)
 	if result != line {
 		t.Errorf("line at exactly 100 chars should NOT be wrapped:\ngot:\n%q", result)
 	}
@@ -2474,7 +2344,7 @@ type T {
 	status Enum["pending_review", "approved", "rejected", "needs_revision", "escalated", "archived", "deleted"] required
 }
 `
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
@@ -2500,7 +2370,7 @@ type T {
 	] required
 }
 `
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
@@ -2526,7 +2396,7 @@ type T {
 	age Integer
 }
 `
-	result, err := format.FormatTokenStream(input)
+	result, err := FormatTokenStream(input)
 	if err != nil {
 		t.Fatalf("formatTokenStream returned error: %v", err)
 	}
@@ -2538,7 +2408,7 @@ type T {
 	}
 
 	// Verify idempotency of full pipeline
-	second, err := format.FormatTokenStream(result)
+	second, err := FormatTokenStream(result)
 	if err != nil {
 		t.Fatalf("formatTokenStream second pass returned error: %v", err)
 	}

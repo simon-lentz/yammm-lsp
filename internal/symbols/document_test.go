@@ -1,48 +1,42 @@
-package lsp
+package symbols
 
 import (
 	"testing"
 
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
-	"github.com/simon-lentz/yammm-lsp/internal/workspace"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/source"
 
-	"github.com/simon-lentz/yammm-lsp/internal/analysis"
-	"github.com/simon-lentz/yammm-lsp/internal/symbols"
+	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 )
 
-// emptySnapshot creates a minimal snapshot for testing symbol structure.
+// testSources creates a minimal source registry for testing symbol structure.
 // UTF-16 conversion will fall back to naive rune column conversion.
-func emptySnapshot() *analysis.Snapshot {
-	return &analysis.Snapshot{
-		Sources: source.NewRegistry(),
-	}
+func testSources() *source.Registry {
+	return source.NewRegistry()
 }
 
-// testServer creates a Server with a minimal workspace for testing.
-func testServer() *Server {
-	return &Server{
-		workspace: workspace.NewWorkspace(nil, workspace.Config{}),
-	}
+// testEncoding returns the default position encoding used in tests.
+func testEncoding() lsputil.PositionEncoding {
+	return lsputil.PositionEncodingUTF16
 }
 
 func TestBuildDocumentSymbols_Empty(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	// Nil index
-	result := s.buildDocumentSymbols(nil, snap)
+	result := BuildDocumentSymbols(nil, sources, enc)
 	if result != nil {
 		t.Error("expected nil for nil index")
 	}
 
 	// Empty index
-	idx := &symbols.SymbolIndex{Symbols: []symbols.Symbol{}}
-	result = s.buildDocumentSymbols(idx, snap)
+	idx := &SymbolIndex{Symbols: []Symbol{}}
+	result = BuildDocumentSymbols(idx, sources, enc)
 	if result != nil {
 		t.Error("expected nil for empty index")
 	}
@@ -51,17 +45,17 @@ func TestBuildDocumentSymbols_Empty(t *testing.T) {
 func TestBuildDocumentSymbols_SchemaOnly(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://schema.yammm")
 	span := location.Range(sourceID, 1, 1, 1, 20)
 
-	idx := &symbols.SymbolIndex{
-		Symbols: []symbols.Symbol{
+	idx := &SymbolIndex{
+		Symbols: []Symbol{
 			{
 				Name:      "MySchema",
-				Kind:      symbols.SymbolSchema,
+				Kind:      SymbolSchema,
 				SourceID:  sourceID,
 				Range:     span,
 				Selection: span,
@@ -70,7 +64,7 @@ func TestBuildDocumentSymbols_SchemaOnly(t *testing.T) {
 		},
 	}
 
-	result := s.buildDocumentSymbols(idx, snap)
+	result := BuildDocumentSymbols(idx, sources, enc)
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 symbol, got %d", len(result))
@@ -88,18 +82,18 @@ func TestBuildDocumentSymbols_SchemaOnly(t *testing.T) {
 func TestBuildDocumentSymbols_TypeWithMembers(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://types.yammm")
 	typeSpan := location.Range(sourceID, 1, 1, 5, 1)
 	propSpan := location.Range(sourceID, 2, 5, 2, 20)
 
-	idx := &symbols.SymbolIndex{
-		Symbols: []symbols.Symbol{
+	idx := &SymbolIndex{
+		Symbols: []Symbol{
 			{
 				Name:      "Person",
-				Kind:      symbols.SymbolType,
+				Kind:      SymbolType,
 				SourceID:  sourceID,
 				Range:     typeSpan,
 				Selection: typeSpan,
@@ -107,7 +101,7 @@ func TestBuildDocumentSymbols_TypeWithMembers(t *testing.T) {
 			},
 			{
 				Name:       "name",
-				Kind:       symbols.SymbolProperty,
+				Kind:       SymbolProperty,
 				SourceID:   sourceID,
 				Range:      propSpan,
 				Selection:  propSpan,
@@ -117,7 +111,7 @@ func TestBuildDocumentSymbols_TypeWithMembers(t *testing.T) {
 		},
 	}
 
-	result := s.buildDocumentSymbols(idx, snap)
+	result := BuildDocumentSymbols(idx, sources, enc)
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 top-level symbol, got %d", len(result))
@@ -149,26 +143,26 @@ func TestBuildDocumentSymbols_TypeWithMembers(t *testing.T) {
 func TestBuildDocumentSymbols_SchemaWithImportsAndTypes(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://full.yammm")
 	schemaSpan := location.Range(sourceID, 1, 1, 1, 20)
 	importSpan := location.Range(sourceID, 2, 1, 2, 30)
 	typeSpan := location.Range(sourceID, 4, 1, 10, 1)
 
-	idx := &symbols.SymbolIndex{
-		Symbols: []symbols.Symbol{
+	idx := &SymbolIndex{
+		Symbols: []Symbol{
 			{
 				Name:      "Main",
-				Kind:      symbols.SymbolSchema,
+				Kind:      SymbolSchema,
 				SourceID:  sourceID,
 				Range:     schemaSpan,
 				Selection: schemaSpan,
 			},
 			{
 				Name:       "parts",
-				Kind:       symbols.SymbolImport,
+				Kind:       SymbolImport,
 				SourceID:   sourceID,
 				Range:      importSpan,
 				Selection:  importSpan,
@@ -177,7 +171,7 @@ func TestBuildDocumentSymbols_SchemaWithImportsAndTypes(t *testing.T) {
 			},
 			{
 				Name:       "Car",
-				Kind:       symbols.SymbolType,
+				Kind:       SymbolType,
 				SourceID:   sourceID,
 				Range:      typeSpan,
 				Selection:  typeSpan,
@@ -187,7 +181,7 @@ func TestBuildDocumentSymbols_SchemaWithImportsAndTypes(t *testing.T) {
 		},
 	}
 
-	result := s.buildDocumentSymbols(idx, snap)
+	result := BuildDocumentSymbols(idx, sources, enc)
 
 	// Schema should be top-level with imports and types as children
 	if len(result) != 1 {
@@ -227,23 +221,23 @@ func TestBuildDocumentSymbols_SchemaWithImportsAndTypes(t *testing.T) {
 func TestBuildDocumentSymbols_MultipleTypes(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://multi.yammm")
 
-	idx := &symbols.SymbolIndex{
-		Symbols: []symbols.Symbol{
+	idx := &SymbolIndex{
+		Symbols: []Symbol{
 			{
 				Name:      "Person",
-				Kind:      symbols.SymbolType,
+				Kind:      SymbolType,
 				SourceID:  sourceID,
 				Range:     location.Range(sourceID, 1, 1, 5, 1),
 				Selection: location.Range(sourceID, 1, 6, 1, 12),
 			},
 			{
 				Name:       "name",
-				Kind:       symbols.SymbolProperty,
+				Kind:       SymbolProperty,
 				SourceID:   sourceID,
 				Range:      location.Range(sourceID, 2, 5, 2, 20),
 				Selection:  location.Range(sourceID, 2, 5, 2, 9),
@@ -251,14 +245,14 @@ func TestBuildDocumentSymbols_MultipleTypes(t *testing.T) {
 			},
 			{
 				Name:      "Company",
-				Kind:      symbols.SymbolType,
+				Kind:      SymbolType,
 				SourceID:  sourceID,
 				Range:     location.Range(sourceID, 7, 1, 11, 1),
 				Selection: location.Range(sourceID, 7, 6, 7, 13),
 			},
 			{
 				Name:       "title",
-				Kind:       symbols.SymbolProperty,
+				Kind:       SymbolProperty,
 				SourceID:   sourceID,
 				Range:      location.Range(sourceID, 8, 5, 8, 20),
 				Selection:  location.Range(sourceID, 8, 5, 8, 10),
@@ -267,7 +261,7 @@ func TestBuildDocumentSymbols_MultipleTypes(t *testing.T) {
 		},
 	}
 
-	result := s.buildDocumentSymbols(idx, snap)
+	result := BuildDocumentSymbols(idx, sources, enc)
 
 	// Should have 2 top-level types
 	if len(result) != 2 {
@@ -285,23 +279,23 @@ func TestBuildDocumentSymbols_MultipleTypes(t *testing.T) {
 func TestBuildDocumentSymbols_Relations(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://relations.yammm")
 
-	idx := &symbols.SymbolIndex{
-		Symbols: []symbols.Symbol{
+	idx := &SymbolIndex{
+		Symbols: []Symbol{
 			{
 				Name:      "Person",
-				Kind:      symbols.SymbolType,
+				Kind:      SymbolType,
 				SourceID:  sourceID,
 				Range:     location.Range(sourceID, 1, 1, 10, 1),
 				Selection: location.Range(sourceID, 1, 6, 1, 12),
 			},
 			{
 				Name:       "EMPLOYER",
-				Kind:       symbols.SymbolAssociation,
+				Kind:       SymbolAssociation,
 				SourceID:   sourceID,
 				Range:      location.Range(sourceID, 2, 5, 2, 30),
 				Selection:  location.Range(sourceID, 2, 9, 2, 17),
@@ -310,7 +304,7 @@ func TestBuildDocumentSymbols_Relations(t *testing.T) {
 			},
 			{
 				Name:       "DOCUMENTS",
-				Kind:       symbols.SymbolComposition,
+				Kind:       SymbolComposition,
 				SourceID:   sourceID,
 				Range:      location.Range(sourceID, 3, 5, 3, 30),
 				Selection:  location.Range(sourceID, 3, 9, 3, 18),
@@ -320,7 +314,7 @@ func TestBuildDocumentSymbols_Relations(t *testing.T) {
 		},
 	}
 
-	result := s.buildDocumentSymbols(idx, snap)
+	result := BuildDocumentSymbols(idx, sources, enc)
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 top-level symbol, got %d", len(result))
@@ -342,23 +336,23 @@ func TestBuildDocumentSymbols_Relations(t *testing.T) {
 func TestBuildDocumentSymbols_Invariants(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://invariants.yammm")
 
-	idx := &symbols.SymbolIndex{
-		Symbols: []symbols.Symbol{
+	idx := &SymbolIndex{
+		Symbols: []Symbol{
 			{
 				Name:      "Person",
-				Kind:      symbols.SymbolType,
+				Kind:      SymbolType,
 				SourceID:  sourceID,
 				Range:     location.Range(sourceID, 1, 1, 5, 1),
 				Selection: location.Range(sourceID, 1, 6, 1, 12),
 			},
 			{
 				Name:       "age must be positive",
-				Kind:       symbols.SymbolInvariant,
+				Kind:       SymbolInvariant,
 				SourceID:   sourceID,
 				Range:      location.Range(sourceID, 3, 5, 3, 40),
 				Selection:  location.Range(sourceID, 3, 7, 3, 27),
@@ -367,7 +361,7 @@ func TestBuildDocumentSymbols_Invariants(t *testing.T) {
 		},
 	}
 
-	result := s.buildDocumentSymbols(idx, snap)
+	result := BuildDocumentSymbols(idx, sources, enc)
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 top-level symbol, got %d", len(result))
@@ -387,16 +381,16 @@ func TestBuildDocumentSymbols_Invariants(t *testing.T) {
 func TestBuildDocumentSymbols_DataType(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://datatypes.yammm")
 
-	idx := &symbols.SymbolIndex{
-		Symbols: []symbols.Symbol{
+	idx := &SymbolIndex{
+		Symbols: []Symbol{
 			{
 				Name:      "ShortName",
-				Kind:      symbols.SymbolDataType,
+				Kind:      SymbolDataType,
 				SourceID:  sourceID,
 				Range:     location.Range(sourceID, 1, 1, 1, 30),
 				Selection: location.Range(sourceID, 1, 6, 1, 15),
@@ -405,7 +399,7 @@ func TestBuildDocumentSymbols_DataType(t *testing.T) {
 		},
 	}
 
-	result := s.buildDocumentSymbols(idx, snap)
+	result := BuildDocumentSymbols(idx, sources, enc)
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 symbol, got %d", len(result))
@@ -421,26 +415,26 @@ func TestSymbolKindToLSP(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		kind     symbols.SymbolKind
+		kind     SymbolKind
 		expected protocol.SymbolKind
 	}{
-		{symbols.SymbolSchema, protocol.SymbolKindModule},
-		{symbols.SymbolImport, protocol.SymbolKindPackage},
-		{symbols.SymbolType, protocol.SymbolKindClass},
-		{symbols.SymbolDataType, protocol.SymbolKindTypeParameter},
-		{symbols.SymbolProperty, protocol.SymbolKindField},
-		{symbols.SymbolAssociation, protocol.SymbolKindProperty},
-		{symbols.SymbolComposition, protocol.SymbolKindProperty},
-		{symbols.SymbolInvariant, protocol.SymbolKindEvent},
-		{symbols.SymbolKind(99), protocol.SymbolKindVariable}, // Unknown
+		{SymbolSchema, protocol.SymbolKindModule},
+		{SymbolImport, protocol.SymbolKindPackage},
+		{SymbolType, protocol.SymbolKindClass},
+		{SymbolDataType, protocol.SymbolKindTypeParameter},
+		{SymbolProperty, protocol.SymbolKindField},
+		{SymbolAssociation, protocol.SymbolKindProperty},
+		{SymbolComposition, protocol.SymbolKindProperty},
+		{SymbolInvariant, protocol.SymbolKindEvent},
+		{SymbolKind(99), protocol.SymbolKindVariable}, // Unknown
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.kind.String(), func(t *testing.T) {
 			t.Parallel()
-			result := symbolKindToLSP(tt.kind)
+			result := SymbolKindToLSP(tt.kind)
 			if result != tt.expected {
-				t.Errorf("symbolKindToLSP(%v) = %v; want %v", tt.kind, result, tt.expected)
+				t.Errorf("SymbolKindToLSP(%v) = %v; want %v", tt.kind, result, tt.expected)
 			}
 		})
 	}
@@ -449,23 +443,23 @@ func TestSymbolKindToLSP(t *testing.T) {
 func TestSymbolToDocumentSymbol(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://sym.yammm")
 	fullSpan := location.Range(sourceID, 1, 1, 5, 1)
 	nameSpan := location.Range(sourceID, 1, 6, 1, 12)
 
-	sym := &symbols.Symbol{
+	sym := &Symbol{
 		Name:      "Person",
-		Kind:      symbols.SymbolType,
+		Kind:      SymbolType,
 		SourceID:  sourceID,
 		Range:     fullSpan,
 		Selection: nameSpan,
 		Detail:    "type Person",
 	}
 
-	result := s.symbolToDocumentSymbol(sym, snap)
+	result := SymbolToDocumentSymbol(sym, sources, enc)
 
 	if result.Name != "Person" {
 		t.Errorf("Name = %q; want 'Person'", result.Name)
@@ -494,22 +488,22 @@ func TestSymbolToDocumentSymbol(t *testing.T) {
 func TestSymbolToDocumentSymbol_NoDetail(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://sym.yammm")
 	span := location.Range(sourceID, 1, 1, 1, 10)
 
-	sym := &symbols.Symbol{
+	sym := &Symbol{
 		Name:      "Test",
-		Kind:      symbols.SymbolType,
+		Kind:      SymbolType,
 		SourceID:  sourceID,
 		Range:     span,
 		Selection: span,
 		Detail:    "", // Empty detail
 	}
 
-	result := s.symbolToDocumentSymbol(sym, snap)
+	result := SymbolToDocumentSymbol(sym, sources, enc)
 
 	// Should fall back to kind string
 	if result.Detail == nil || *result.Detail != "Type" {
@@ -520,18 +514,17 @@ func TestSymbolToDocumentSymbol_NoDetail(t *testing.T) {
 func TestBuildDocumentSymbols_OrphanImports_SyntheticSchema(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://orphan.yammm")
 
 	// Simulate a broken file with imports but no schema declaration
-	// (e.g., severe parse failure that only extracted the import)
-	idx := &symbols.SymbolIndex{
-		Symbols: []symbols.Symbol{
+	idx := &SymbolIndex{
+		Symbols: []Symbol{
 			{
 				Name:      "parts",
-				Kind:      symbols.SymbolImport,
+				Kind:      SymbolImport,
 				SourceID:  sourceID,
 				Range:     location.Range(sourceID, 1, 1, 1, 30),
 				Selection: location.Range(sourceID, 1, 20, 1, 25),
@@ -540,7 +533,7 @@ func TestBuildDocumentSymbols_OrphanImports_SyntheticSchema(t *testing.T) {
 		},
 	}
 
-	result := s.buildDocumentSymbols(idx, snap)
+	result := BuildDocumentSymbols(idx, sources, enc)
 
 	// Should have a synthetic schema root containing the import
 	if len(result) != 1 {
@@ -578,17 +571,17 @@ func TestBuildDocumentSymbols_OrphanImports_SyntheticSchema(t *testing.T) {
 func TestBuildDocumentSymbols_OrphanImportsAndTypes_SyntheticSchema(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://orphan-mixed.yammm")
 
 	// Simulate a broken file with both imports and types but no schema declaration
-	idx := &symbols.SymbolIndex{
-		Symbols: []symbols.Symbol{
+	idx := &SymbolIndex{
+		Symbols: []Symbol{
 			{
 				Name:      "parts",
-				Kind:      symbols.SymbolImport,
+				Kind:      SymbolImport,
 				SourceID:  sourceID,
 				Range:     location.Range(sourceID, 1, 1, 1, 30),
 				Selection: location.Range(sourceID, 1, 20, 1, 25),
@@ -596,7 +589,7 @@ func TestBuildDocumentSymbols_OrphanImportsAndTypes_SyntheticSchema(t *testing.T
 			},
 			{
 				Name:      "Car",
-				Kind:      symbols.SymbolType,
+				Kind:      SymbolType,
 				SourceID:  sourceID,
 				Range:     location.Range(sourceID, 3, 1, 6, 2),
 				Selection: location.Range(sourceID, 3, 6, 3, 9),
@@ -605,7 +598,7 @@ func TestBuildDocumentSymbols_OrphanImportsAndTypes_SyntheticSchema(t *testing.T
 		},
 	}
 
-	result := s.buildDocumentSymbols(idx, snap)
+	result := BuildDocumentSymbols(idx, sources, enc)
 
 	// Should have a synthetic schema root containing both import and type
 	if len(result) != 1 {
@@ -643,17 +636,17 @@ func TestBuildDocumentSymbols_OrphanImportsAndTypes_SyntheticSchema(t *testing.T
 func TestBuildDocumentSymbols_SchemaNameEqualsTypeName(t *testing.T) {
 	t.Parallel()
 
-	s := testServer()
-	snap := emptySnapshot()
+	sources := testSources()
+	enc := testEncoding()
 
 	sourceID := location.MustNewSourceID("test://collision.yammm")
 
 	// Schema and Type both named "Person"
-	idx := &symbols.SymbolIndex{
-		Symbols: []symbols.Symbol{
+	idx := &SymbolIndex{
+		Symbols: []Symbol{
 			{
 				Name:      "Person",
-				Kind:      symbols.SymbolSchema,
+				Kind:      SymbolSchema,
 				SourceID:  sourceID,
 				Range:     location.Range(sourceID, 1, 1, 6, 1),
 				Selection: location.Range(sourceID, 1, 8, 1, 14),
@@ -661,7 +654,7 @@ func TestBuildDocumentSymbols_SchemaNameEqualsTypeName(t *testing.T) {
 			},
 			{
 				Name:       "Person",
-				Kind:       symbols.SymbolType,
+				Kind:       SymbolType,
 				SourceID:   sourceID,
 				Range:      location.Range(sourceID, 2, 1, 5, 1),
 				Selection:  location.Range(sourceID, 2, 6, 2, 12),
@@ -670,7 +663,7 @@ func TestBuildDocumentSymbols_SchemaNameEqualsTypeName(t *testing.T) {
 			},
 			{
 				Name:       "name",
-				Kind:       symbols.SymbolProperty,
+				Kind:       SymbolProperty,
 				SourceID:   sourceID,
 				Range:      location.Range(sourceID, 3, 5, 3, 20),
 				Selection:  location.Range(sourceID, 3, 5, 3, 9),
@@ -680,7 +673,7 @@ func TestBuildDocumentSymbols_SchemaNameEqualsTypeName(t *testing.T) {
 		},
 	}
 
-	result := s.buildDocumentSymbols(idx, snap)
+	result := BuildDocumentSymbols(idx, sources, enc)
 
 	// Should complete without infinite recursion
 	// Schema should be top-level

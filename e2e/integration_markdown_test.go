@@ -1,12 +1,14 @@
-package lsp
+package e2e_test
 
 import (
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
+	lsp "github.com/simon-lentz/yammm-lsp"
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm-lsp/internal/docstate"
@@ -15,6 +17,40 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// notificationCollector captures LSP notifications for testing.
+type notificationCollector struct {
+	mu      sync.Mutex
+	entries []notificationEntry
+}
+
+type notificationEntry struct {
+	Method string
+	Params any
+}
+
+func (c *notificationCollector) notify(method string, params any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = append(c.entries, notificationEntry{Method: method, Params: params})
+}
+
+func (c *notificationCollector) diagnosticsFor(uri string) []protocol.Diagnostic {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i := len(c.entries) - 1; i >= 0; i-- {
+		e := c.entries[i]
+		if e.Method != protocol.ServerTextDocumentPublishDiagnostics {
+			continue
+		}
+		p, ok := e.Params.(protocol.PublishDiagnosticsParams)
+		if ok && p.URI == uri {
+			return p.Diagnostics
+		}
+	}
+	return nil
+}
 
 // newMarkdownTestHarness creates a harness for markdown integration testing.
 // Initializes the server with the given root directory.
@@ -29,10 +65,10 @@ func newMarkdownTestHarness(t *testing.T, root string) *testutil.Harness {
 // newMarkdownTestHarnessWithServer creates a harness and returns the underlying
 // server, giving tests direct access to the workspace for diagnostic assertions
 // and text inspection.
-func newMarkdownTestHarnessWithServer(t *testing.T, root string) (*testutil.Harness, *Server) {
+func newMarkdownTestHarnessWithServer(t *testing.T, root string) (*testutil.Harness, *lsp.Server) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := NewServer(logger, Config{ModuleRoot: root})
+	server := lsp.NewServer(logger, lsp.Config{ModuleRoot: root})
 	h := testutil.NewHarness(t, server.Mux(), root)
 	err := h.Initialize()
 	require.NoError(t, err, "harness initialization failed")
@@ -54,11 +90,11 @@ func TestMarkdownIntegration_DiagnosticsInCodeBlock(t *testing.T) {
 	// Open the markdown document directly in the workspace (bypassing jrpc2)
 	// so we can call analyzeMarkdownAndPublish synchronously without a race.
 	uri := testutil.PathToURI(mdPath)
-	server.workspace.MarkdownDocumentOpened(uri, 1, content)
+	server.Workspace().MarkdownDocumentOpened(uri, 1, content)
 
 	// Re-analyze with a notificationCollector so we can inspect published diagnostics.
 	collector := &notificationCollector{}
-	server.workspace.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
+	server.Workspace().AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	diags := collector.diagnosticsFor(uri)
 	assert.NotEmpty(t, diags, "expected diagnostics for syntax error in code block")
@@ -275,11 +311,11 @@ func TestMarkdownIntegration_ImportRejection(t *testing.T) {
 	// Open the markdown document directly in the workspace (bypassing jrpc2)
 	// so we can call analyzeMarkdownAndPublish synchronously without a race.
 	uri := testutil.PathToURI(mdPath)
-	server.workspace.MarkdownDocumentOpened(uri, 1, content)
+	server.Workspace().MarkdownDocumentOpened(uri, 1, content)
 
 	// Re-analyze with a notificationCollector so we can inspect published diagnostics.
 	collector := &notificationCollector{}
-	server.workspace.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
+	server.Workspace().AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	diags := collector.diagnosticsFor(uri)
 	require.NotEmpty(t, diags, "expected diagnostics for import rejection")
@@ -374,7 +410,7 @@ func TestMarkdownIntegration_StaleVersionRejection(t *testing.T) {
 
 	// Directly verify the stored text retained v2 content (stale v1 was rejected).
 	uri := testutil.PathToURI(mdPath)
-	text, ok := server.workspace.GetMarkdownCurrentText(uri)
+	text, ok := server.Workspace().GetMarkdownCurrentText(uri)
 	require.True(t, ok, "markdown document should still be tracked")
 	assert.Equal(t, updatedContent, text, "stale v1 change should not overwrite v2 content")
 }
@@ -529,7 +565,7 @@ func TestMarkdownIntegration_FeaturesWithMarkdownOnly(t *testing.T) {
 func TestMarkdownIntegration_Fixtures(t *testing.T) {
 	t.Parallel()
 
-	fixtureDir := filepath.Join("testdata", "lsp", "markdown")
+	fixtureDir := filepath.Join("..", "testdata", "lsp", "markdown")
 
 	tests := []struct {
 		name string

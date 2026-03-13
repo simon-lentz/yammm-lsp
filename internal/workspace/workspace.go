@@ -264,15 +264,7 @@ func rangeToByteOffset(lines []string, line, char int, enc lsputil.PositionEncod
 	}
 
 	if line < len(lines) {
-		lineContent := []byte(lines[line])
-		var charOffset int
-		switch enc {
-		case lsputil.PositionEncodingUTF8:
-			charOffset = min(char, len(lineContent))
-		default:
-			charOffset = lsputil.UTF16CharToByteOffset(lineContent, 0, char)
-		}
-		offset += charOffset
+		offset += lsputil.CharToByteOnLine([]byte(lines[line]), char, enc)
 	}
 
 	return offset

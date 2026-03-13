@@ -1,4 +1,4 @@
-package lsp
+package e2e_test
 
 import (
 	"fmt"
@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	lsp "github.com/simon-lentz/yammm-lsp"
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 	"github.com/simon-lentz/yammm-lsp/internal/workspace"
 	"github.com/simon-lentz/yammm-lsp/testutil"
@@ -25,10 +26,10 @@ const debounceWait = 400 * time.Millisecond
 
 // newTestHarnessWithServer creates a harness with an initialized LSP server,
 // returning both the harness and server for tests that need direct workspace access.
-func newTestHarnessWithServer(t *testing.T, root string) (*testutil.Harness, *Server) {
+func newTestHarnessWithServer(t *testing.T, root string) (*testutil.Harness, *lsp.Server) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := NewServer(logger, Config{ModuleRoot: root})
+	server := lsp.NewServer(logger, lsp.Config{ModuleRoot: root})
 	h := testutil.NewHarness(t, server.Mux(), root)
 	require.NoError(t, h.Initialize(), "harness initialization failed")
 	return h, server
@@ -121,7 +122,7 @@ func TestTemporal_CloseCancelsPendingAnalysis(t *testing.T) {
 	h.Sync()
 
 	uri := testutil.PathToURI(filepath.Join(tmpDir, "test.yammm"))
-	snap := server.workspace.LatestSnapshot(uri)
+	snap := server.Workspace().LatestSnapshot(uri)
 	require.NotNil(t, snap, "snapshot should exist after open")
 
 	// Change document — starts 150ms debounce timer.
@@ -138,7 +139,7 @@ func TestTemporal_CloseCancelsPendingAnalysis(t *testing.T) {
 	h.Sync()
 
 	// Snapshot should be nil (cleaned up by close).
-	snap = server.workspace.LatestSnapshot(uri)
+	snap = server.Workspace().LatestSnapshot(uri)
 	assert.Nil(t, snap, "snapshot should be nil after close")
 
 	// Diagnostics should be empty (not stale error diagnostics).
