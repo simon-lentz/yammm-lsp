@@ -13,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/docstate"
 	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
@@ -70,7 +71,7 @@ func (s *Server) textDocumentCompletion(_ context.Context, params *protocol.Comp
 // snapshot may be nil — graceful degradation provides keywords, snippets,
 // and built-in types without a schema.
 // The line and char parameters are LSP-encoding coordinates.
-func (s *Server) completionAtPosition(snapshot *analysis.Snapshot, doc *documentSnapshot, line, char int) any {
+func (s *Server) completionAtPosition(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char int) any {
 	if snapshot != nil && snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for completion",
 			"uri", doc.URI,
@@ -139,7 +140,7 @@ func (s *Server) completionAtPosition(snapshot *analysis.Snapshot, doc *document
 
 // detectCompletionContext analyzes text around cursor to determine context.
 // It accepts a documentSnapshot to leverage cached lineState for O(1) type body detection.
-func (s *Server) detectCompletionContext(doc *documentSnapshot, line, character int) completionContext {
+func (s *Server) detectCompletionContext(doc *docstate.Snapshot, line, character int) completionContext {
 	lines := strings.Split(doc.Text, "\n")
 	if line < 0 || line >= len(lines) {
 		return contextUnknown
@@ -371,18 +372,18 @@ func containsAsKeyword(s string) bool {
 // Falls back to direct computation if lineState is unavailable or stale.
 //
 // The cursorCol parameter is the byte offset within the current line.
-func (s *Server) isInsideTypeBody(doc *documentSnapshot, lines []string, currentLine, cursorCol int) bool {
+func (s *Server) isInsideTypeBody(doc *docstate.Snapshot, lines []string, currentLine, cursorCol int) bool {
 	// Use cached brace depth if available and matches current document version
-	if doc != nil && doc.lineState != nil && doc.lineState.Version == doc.Version {
-		if currentLine < len(doc.lineState.BraceDepth) {
+	if doc != nil && doc.LineState != nil && doc.LineState.Version == doc.Version {
+		if currentLine < len(doc.LineState.BraceDepth) {
 			// Get depth and block comment state at start of current line
 			// (these are the values at the END of the previous line)
 			startDepth := 0
 			startInBlockComment := false
-			if currentLine > 0 && currentLine-1 < len(doc.lineState.BraceDepth) {
-				startDepth = doc.lineState.BraceDepth[currentLine-1]
-				if currentLine-1 < len(doc.lineState.InBlockComment) {
-					startInBlockComment = doc.lineState.InBlockComment[currentLine-1]
+			if currentLine > 0 && currentLine-1 < len(doc.LineState.BraceDepth) {
+				startDepth = doc.LineState.BraceDepth[currentLine-1]
+				if currentLine-1 < len(doc.LineState.InBlockComment) {
+					startInBlockComment = doc.LineState.InBlockComment[currentLine-1]
 				}
 			}
 
@@ -418,15 +419,15 @@ func (s *Server) isInsideTypeBody(doc *documentSnapshot, lines []string, current
 //
 // The cursorCol parameter is the byte offset within the current line.
 func isInsideTypeBodyDirect(lines []string, currentLine, cursorCol int) bool {
-	var bs braceScanner
+	var bs docstate.BraceScanner
 	for i := 0; i <= currentLine && i < len(lines); i++ {
 		maxCol := len(lines[i])
 		if i == currentLine && cursorCol < maxCol {
 			maxCol = cursorCol
 		}
-		bs.scanLine(lines[i], maxCol)
+		bs.ScanLine(lines[i], maxCol)
 	}
-	return bs.depth > 0
+	return bs.Depth > 0
 }
 
 // hasNetPositiveDepthUpToColumn checks if there are more opening braces than closing braces
@@ -440,8 +441,8 @@ func hasNetPositiveDepthUpToColumn(line string, cursorCol int, startInBlockComme
 // This properly skips braces in comments and string literals.
 // startInBlockComment indicates whether the line starts inside a multi-line block comment.
 func depthAtColumn(line string, cursorCol, startDepth int, startInBlockComment bool) int {
-	bs := braceScanner{depth: startDepth, inBlockComment: startInBlockComment}
-	return bs.scanLine(line, cursorCol)
+	bs := docstate.BraceScanner{Depth: startDepth, InBlockComment: startInBlockComment}
+	return bs.ScanLine(line, cursorCol)
 }
 
 // isIdentifier checks if a string is a valid identifier.

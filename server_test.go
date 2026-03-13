@@ -6,7 +6,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/simon-lentz/yammm-lsp/internal/docstate"
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
+	"github.com/simon-lentz/yammm-lsp/internal/workspace"
 )
 
 func TestNewServer(t *testing.T) {
@@ -101,7 +103,7 @@ func TestServer_WorkspaceCreated(t *testing.T) {
 	}
 
 	// The workspace should inherit the config's module root
-	root := server.workspace.findModuleRoot("/any/path/file.yammm")
+	root := server.workspace.FindModuleRoot("/any/path/file.yammm")
 	if root != "/test" {
 		t.Errorf("workspace.findModuleRoot() = %q; want /test", root)
 	}
@@ -119,12 +121,12 @@ func TestChangeDocument_IncrementalMultipleChanges(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := NewWorkspace(logger, Config{})
+	ws := workspace.NewWorkspace(logger, workspace.Config{})
 
 	uri := "file:///test/multi-change.yammm"
 
 	// Open document with initial content: "line1\nline2\nline3"
-	ws.documentOpened(uri, 1, "line1\nline2\nline3")
+	ws.DocumentOpened(uri, 1, "line1\nline2\nline3")
 
 	// Apply multiple incremental changes via ChangeDocument.
 	// This tests that line offsets are correctly recomputed after each change.
@@ -173,13 +175,13 @@ func TestChangeDocument_IncrementalMultibyteUTF16(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := NewWorkspace(logger, Config{})
+	ws := workspace.NewWorkspace(logger, workspace.Config{})
 
 	uri := "file:///test/multibyte.yammm"
 
 	// Content with multibyte characters: emoji takes 2 UTF-16 code units
 	// "hello 🎉 world" - the emoji is at byte offset 6, but UTF-16 offset 6
-	ws.documentOpened(uri, 1, "hello 🎉 world")
+	ws.DocumentOpened(uri, 1, "hello 🎉 world")
 
 	// Insert "X" after the emoji. In UTF-16, the emoji is 2 code units,
 	// so position after emoji is character 8 (h=0,e=1,l=2,l=3,o=4, =5,🎉=6-7, =8)
@@ -218,7 +220,7 @@ func TestDidChange_MultipleFullSyncChanges(t *testing.T) {
 	uri := "file:///test/multi-full-sync.yammm"
 
 	// Open document with initial content
-	server.workspace.documentOpened(uri, 1, "initial content")
+	server.workspace.DocumentOpened(uri, 1, "initial content")
 
 	// Send multiple full-sync changes in one notification.
 	// Only the LAST one should be applied.
@@ -262,12 +264,12 @@ func TestChangeDocument_IncrementalCRLF(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := NewWorkspace(logger, Config{})
+	ws := workspace.NewWorkspace(logger, workspace.Config{})
 
 	uri := "file:///test/crlf.yammm"
 
 	// Open document with CRLF line endings
-	ws.documentOpened(uri, 1, "line1\r\nline2\r\nline3")
+	ws.DocumentOpened(uri, 1, "line1\r\nline2\r\nline3")
 
 	// Insert "X" at line 1, char 5 (after "line2")
 	// Without proper CRLF handling, the byte offset would be wrong because
@@ -302,12 +304,12 @@ func TestChangeDocument_IncrementalMixedLineEndings(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := NewWorkspace(logger, Config{})
+	ws := workspace.NewWorkspace(logger, workspace.Config{})
 
 	uri := "file:///test/mixed.yammm"
 
 	// Open document with mixed line endings: CRLF then LF then CRLF
-	ws.documentOpened(uri, 1, "line1\r\nline2\nline3\r\nline4")
+	ws.DocumentOpened(uri, 1, "line1\r\nline2\nline3\r\nline4")
 
 	// Insert at line 2, char 5 (after "line3")
 	changes := []any{
@@ -354,9 +356,9 @@ func TestNormalizeLineEndings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := normalizeLineEndings(tt.input)
+			got := docstate.NormalizeLineEndings(tt.input)
 			if got != tt.want {
-				t.Errorf("normalizeLineEndings(%q) = %q; want %q", tt.input, got, tt.want)
+				t.Errorf("docstate.NormalizeLineEndings(%q) = %q; want %q", tt.input, got, tt.want)
 			}
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
+	"github.com/simon-lentz/yammm-lsp/internal/workspace"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/source"
@@ -23,7 +24,7 @@ func emptySnapshot() *analysis.Snapshot {
 // testServer creates a Server with a minimal workspace for testing.
 func testServer() *Server {
 	return &Server{
-		workspace: NewWorkspace(nil, Config{}),
+		workspace: workspace.NewWorkspace(nil, workspace.Config{}),
 	}
 }
 

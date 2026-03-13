@@ -11,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/docstate"
 	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
@@ -60,7 +61,7 @@ func (s *Server) textDocumentDefinition(_ context.Context, params *protocol.Defi
 // Returns nil, nil when no definition is found.
 //
 //nolint:nilnil // LSP protocol: nil result means "no definition found"
-func (s *Server) definitionAtPosition(snapshot *analysis.Snapshot, doc *documentSnapshot, line, char int) (any, error) {
+func (s *Server) definitionAtPosition(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char int) (any, error) {
 	if snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for definition",
 			"uri", doc.URI,

@@ -9,6 +9,7 @@ import (
 
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
+	"github.com/simon-lentz/yammm-lsp/internal/docstate"
 	"github.com/simon-lentz/yammm-lsp/testutil"
 
 	"github.com/stretchr/testify/assert"
@@ -53,11 +54,11 @@ func TestMarkdownIntegration_DiagnosticsInCodeBlock(t *testing.T) {
 	// Open the markdown document directly in the workspace (bypassing jrpc2)
 	// so we can call analyzeMarkdownAndPublish synchronously without a race.
 	uri := testutil.PathToURI(mdPath)
-	server.workspace.markdownDocumentOpened(uri, 1, content)
+	server.workspace.MarkdownDocumentOpened(uri, 1, content)
 
 	// Re-analyze with a notificationCollector so we can inspect published diagnostics.
 	collector := &notificationCollector{}
-	server.workspace.analyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
+	server.workspace.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	diags := collector.diagnosticsFor(uri)
 	assert.NotEmpty(t, diags, "expected diagnostics for syntax error in code block")
@@ -274,11 +275,11 @@ func TestMarkdownIntegration_ImportRejection(t *testing.T) {
 	// Open the markdown document directly in the workspace (bypassing jrpc2)
 	// so we can call analyzeMarkdownAndPublish synchronously without a race.
 	uri := testutil.PathToURI(mdPath)
-	server.workspace.markdownDocumentOpened(uri, 1, content)
+	server.workspace.MarkdownDocumentOpened(uri, 1, content)
 
 	// Re-analyze with a notificationCollector so we can inspect published diagnostics.
 	collector := &notificationCollector{}
-	server.workspace.analyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
+	server.workspace.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	diags := collector.diagnosticsFor(uri)
 	require.NotEmpty(t, diags, "expected diagnostics for import rejection")
@@ -373,7 +374,7 @@ func TestMarkdownIntegration_StaleVersionRejection(t *testing.T) {
 
 	// Directly verify the stored text retained v2 content (stale v1 was rejected).
 	uri := testutil.PathToURI(mdPath)
-	text, ok := server.workspace.getMarkdownCurrentText(uri)
+	text, ok := server.workspace.GetMarkdownCurrentText(uri)
 	require.True(t, ok, "markdown document should still be tracked")
 	assert.Equal(t, updatedContent, text, "stale v1 change should not overwrite v2 content")
 }
@@ -557,7 +558,7 @@ func TestMarkdownIntegration_Fixtures(t *testing.T) {
 
 			data, err := os.ReadFile(filepath.Join(fixtureDir, tt.file))
 			require.NoError(t, err)
-			content := normalizeLineEndings(string(data))
+			content := docstate.NormalizeLineEndings(string(data))
 
 			mdPath := filepath.Join(tmpDir, tt.file)
 			require.NoError(t, os.WriteFile(mdPath, []byte(content), 0o600))

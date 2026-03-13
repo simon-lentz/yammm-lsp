@@ -4,6 +4,9 @@ import (
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/docstate"
+	"github.com/simon-lentz/yammm-lsp/internal/markdown"
+	"github.com/simon-lentz/yammm-lsp/internal/workspace"
 )
 
 // analysisUnit is a normalized view of an analysis context for a single
@@ -11,7 +14,7 @@ import (
 // .yammm files and yammm code blocks embedded in markdown.
 type analysisUnit struct {
 	Snapshot  *analysis.Snapshot // May be nil (completion gracefully degrades)
-	Doc       *documentSnapshot
+	Doc       *docstate.Snapshot
 	LocalLine int // Position in document/block-local coordinates
 	LocalChar int
 	Remap     *blockRemap // nil for standalone .yammm files
@@ -19,7 +22,7 @@ type analysisUnit struct {
 
 // blockRemap translates block-local coordinates back to markdown-file coordinates.
 type blockRemap struct {
-	mdSnap     *markdownDocumentSnapshot
+	mdSnap     *workspace.MarkdownDocumentSnapshot
 	blockIndex int
 }
 
@@ -144,4 +147,23 @@ func (s *Server) resolveAllUnits(uri string) []analysisUnit {
 		Doc:      doc,
 		Remap:    nil,
 	}}
+}
+
+// buildBlockDocumentSnapshot creates a docstate.Snapshot for a single code block
+// within a markdown document. This is the shared utility used by all feature
+// providers (hover, completion, definition, symbols) to bridge between
+// markdown-level state and block-level analysis.
+func (s *Server) buildBlockDocumentSnapshot(mdSnap *workspace.MarkdownDocumentSnapshot, block markdown.CodeBlock) *docstate.Snapshot {
+	depths, inComment := docstate.ComputeBraceDepths(block.Content)
+	return &docstate.Snapshot{
+		URI:      mdSnap.URI,
+		SourceID: block.SourceID,
+		Version:  mdSnap.Version,
+		Text:     block.Content,
+		LineState: &docstate.LineState{
+			Version:        mdSnap.Version,
+			BraceDepth:     depths,
+			InBlockComment: inComment,
+		},
+	}
 }

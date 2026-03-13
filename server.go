@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +16,18 @@ import (
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
+	"github.com/simon-lentz/yammm-lsp/internal/workspace"
+)
+
+// PositionEncoding is an alias for lsputil.PositionEncoding within the lsp package.
+type PositionEncoding = lsputil.PositionEncoding
+
+const (
+	// PositionEncodingUTF16 counts positions in UTF-16 code units (default).
+	PositionEncodingUTF16 = lsputil.PositionEncodingUTF16
+
+	// PositionEncodingUTF8 counts positions in UTF-8 bytes.
+	PositionEncodingUTF8 = lsputil.PositionEncodingUTF8
 )
 
 const (
@@ -36,7 +47,7 @@ type Server struct {
 	config    Config
 	mux       handler.Map
 	jrpcSrv   *jrpc2.Server
-	workspace *Workspace
+	workspace *workspace.Workspace
 
 	// traceValue stores the current trace level (replaces protocol.SetTraceValue global)
 	traceValue protocol.TraceValue
@@ -56,9 +67,11 @@ func NewServer(logger *slog.Logger, cfg Config) *Server {
 		logger = slog.Default()
 	}
 	s := &Server{
-		logger:    logger.With(slog.String("component", "server")),
-		config:    cfg,
-		workspace: NewWorkspace(logger, cfg), // Pass base logger; workspace adds its own component
+		logger: logger.With(slog.String("component", "server")),
+		config: cfg,
+		workspace: workspace.NewWorkspace(logger, workspace.Config{
+			ModuleRoot: cfg.ModuleRoot,
+		}),
 	}
 
 	s.mux = handler.Map{
@@ -93,9 +106,12 @@ func NewServer(logger *slog.Logger, cfg Config) *Server {
 // Mux returns the handler map for testing purposes.
 func (s *Server) Mux() handler.Map { return s.mux }
 
-// notifier creates a notifyFunc from a jrpc2 handler context.
+// Workspace returns the workspace for testing purposes.
+func (s *Server) Workspace() *workspace.Workspace { return s.workspace }
+
+// notifier creates a workspace.NotifyFunc from a jrpc2 handler context.
 // Returns nil if ctx has no jrpc2 server (e.g., in unit tests).
-func (s *Server) notifier(ctx context.Context) notifyFunc {
+func (s *Server) notifier(ctx context.Context) workspace.NotifyFunc {
 	srv := recoverServerFromContext(ctx)
 	if srv == nil {
 		return nil
@@ -177,7 +193,6 @@ func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams
 	case params.RootURI != nil:
 		s.workspace.AddRoot(*params.RootURI)
 	case params.RootPath != nil:
-		// Fallback for older LSP clients that only provide RootPath
 		s.workspace.AddRoot(lsputil.PathToURI(*params.RootPath))
 	}
 
@@ -226,7 +241,6 @@ func (s *Server) initialized(_ context.Context, params *protocol.InitializedPara
 }
 
 // shutdown handles the shutdown request.
-// LSP shutdown is a request (returns a response), so it returns (any, error).
 func (s *Server) shutdown(_ context.Context) (any, error) {
 	s.logger.Info("shutdown request received")
 	s.shutdownCalled = true
@@ -235,11 +249,6 @@ func (s *Server) shutdown(_ context.Context) (any, error) {
 }
 
 // exit handles the exit notification per LSP spec.
-// Exit code is 0 if shutdown was called first, 1 otherwise.
-//
-// os.Exit is intentional: the LSP spec requires the process to terminate on
-// the exit notification. This bypasses deferred cleanup in main.run(), but
-// the JSON logger does not buffer, so no output is lost.
 func (s *Server) exit(_ context.Context) error {
 	exitCode := 0
 	if !s.shutdownCalled {
@@ -259,9 +268,6 @@ func (s *Server) setTrace(_ context.Context, params *protocol.SetTraceParams) er
 }
 
 // cancelRequest handles the $/cancelRequest notification.
-//
-// This method logs cancellation requests for debugging. The current implementation
-// relies on context-based cancellation in scheduleAnalysis for debounced operations.
 func (s *Server) cancelRequest(_ context.Context, params *protocol.CancelParams) error {
 	s.logger.Debug("cancelRequest", slog.Any("id", params.ID))
 	return nil
@@ -289,80 +295,6 @@ func (s *Server) textDocumentDidChange(ctx context.Context, params *protocol.Did
 	return nil
 }
 
-// mergeIncrementalChanges applies incremental content changes to currentText
-// and returns the merged result. It is a pure function with no side effects.
-func mergeIncrementalChanges(currentText string, enc PositionEncoding, changes []any, logger *slog.Logger) string {
-	text := normalizeLineEndings(currentText)
-
-	for _, rawChange := range changes {
-		change, ok := rawChange.(protocol.TextDocumentContentChangeEvent)
-		if !ok {
-			continue
-		}
-		if change.Range == nil {
-			text = normalizeLineEndings(change.Text)
-			continue
-		}
-
-		lines := strings.Split(text, "\n")
-		startOffset := rangeToByteOffset(lines, int(change.Range.Start.Line), int(change.Range.Start.Character), enc)
-		endOffset := rangeToByteOffset(lines, int(change.Range.End.Line), int(change.Range.End.Character), enc)
-
-		if startOffset <= len(text) && endOffset <= len(text) && startOffset <= endOffset {
-			text = text[:startOffset] + normalizeLineEndings(change.Text) + text[endOffset:]
-		} else {
-			if logger != nil {
-				logger.Warn("incremental change has invalid range, using full-text fallback",
-					slog.Int("start_offset", startOffset),
-					slog.Int("end_offset", endOffset),
-					slog.Int("text_len", len(text)),
-				)
-			}
-			text = normalizeLineEndings(change.Text)
-		}
-	}
-	return text
-}
-
-// rangeToByteOffset converts an LSP position to a byte offset in the document.
-// The encoding parameter specifies how character positions are counted (UTF-16 or UTF-8).
-func rangeToByteOffset(lines []string, line, char int, enc PositionEncoding) int {
-	offset := 0
-
-	// Sum lengths of preceding lines (including newlines)
-	for i := 0; i < line && i < len(lines); i++ {
-		offset += len(lines[i]) + 1 // +1 for newline
-	}
-
-	// Add character offset within line using the negotiated encoding
-	if line < len(lines) {
-		lineContent := []byte(lines[line])
-		var charOffset int
-		switch enc {
-		case PositionEncodingUTF8:
-			// UTF-8 encoding: character offset IS byte offset
-			charOffset = min(char, len(lineContent))
-		default:
-			// UTF-16 encoding (default): convert from UTF-16 code units to bytes
-			charOffset = lsputil.UTF16CharToByteOffset(lineContent, 0, char)
-		}
-		offset += charOffset
-	}
-
-	return offset
-}
-
-// normalizeLineEndings converts CRLF and CR line endings to LF.
-// This ensures consistent line ending handling across platforms.
-// Windows clients may send CRLF (\r\n), which would cause incorrect
-// byte offset calculations in rangeToByteOffset.
-func normalizeLineEndings(text string) string {
-	// First replace CRLF with LF, then replace any remaining CR with LF
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-	return text
-}
-
 // textDocumentDidClose handles textDocument/didClose.
 func (s *Server) textDocumentDidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error {
 	s.logger.Debug("textDocument/didClose", slog.String("uri", params.TextDocument.URI))
@@ -383,21 +315,17 @@ func (s *Server) workspaceDidChangeWatchedFiles(ctx context.Context, params *pro
 }
 
 // workspaceDidChangeWorkspaceFolders handles workspace/didChangeWorkspaceFolders.
-// This is called when the user adds or removes workspace folders in VS Code.
 func (s *Server) workspaceDidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) error {
-	// Process removed folders first to ensure clean state
 	for _, folder := range params.Event.Removed {
 		s.logger.Debug("workspace folder removed", slog.String("uri", folder.URI))
 		s.workspace.RemoveRoot(folder.URI)
 	}
 
-	// Process added folders
 	for _, folder := range params.Event.Added {
 		s.logger.Debug("workspace folder added", slog.String("uri", folder.URI))
 		s.workspace.AddRoot(folder.URI)
 	}
 
-	// Trigger re-analysis of open documents whose module root may have changed
 	s.workspace.ReanalyzeOpenDocuments(s.notifier(ctx)) //nolint:contextcheck // notifyFunc captures ctx
 
 	return nil

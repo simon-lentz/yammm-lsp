@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm-lsp/internal/docstate"
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/location"
@@ -20,10 +21,10 @@ import (
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
 
-// textToDoc creates a minimal documentSnapshot for testing detectCompletionContext.
-// lineState is nil so tests exercise the fallback path (isInsideTypeBodyDirect).
-func textToDoc(text string) *documentSnapshot {
-	return &documentSnapshot{Text: text}
+// textToDoc creates a minimal docstate.Snapshot for testing detectCompletionContext.
+// LineState is nil so tests exercise the fallback path (isInsideTypeBodyDirect).
+func textToDoc(text string) *docstate.Snapshot {
+	return &docstate.Snapshot{Text: text}
 }
 
 func TestDetectCompletionContext_TopLevel(t *testing.T) {
@@ -622,12 +623,12 @@ func TestIsInsideTypeBody_CachedLineState(t *testing.T) {
 	lines := strings.Split(text, "\n")
 
 	// Pre-compute lineState using the same logic as Workspace
-	braceDepths, inComment := computeBraceDepths(text)
+	braceDepths, inComment := docstate.ComputeBraceDepths(text)
 
-	doc := &documentSnapshot{
+	doc := &docstate.Snapshot{
 		Version: 1,
 		Text:    text,
-		lineState: &lineState{
+		LineState: &docstate.LineState{
 			Version:        1, // Matches doc version
 			BraceDepth:     braceDepths,
 			InBlockComment: inComment,
@@ -667,10 +668,10 @@ func TestIsInsideTypeBody_StaleCacheUsesDirectComputation(t *testing.T) {
 	text := "type A {\n    name String\n}"
 	lines := strings.Split(text, "\n")
 
-	doc := &documentSnapshot{
+	doc := &docstate.Snapshot{
 		Version: 2, // document version
 		Text:    text,
-		lineState: &lineState{
+		LineState: &docstate.LineState{
 			Version:    1, // Stale cache version
 			BraceDepth: []int{1, 1, 0},
 		},
@@ -697,7 +698,7 @@ func TestIsInsideTypeBody_CachedLineState_MultiLineBlockComment(t *testing.T) {
 	lines := strings.Split(text, "\n")
 
 	// Pre-compute lineState
-	braceDepths, inComment := computeBraceDepths(text)
+	braceDepths, inComment := docstate.ComputeBraceDepths(text)
 
 	// Verify the computed state is correct
 	// Line 0: "type A {" -> depth 1, not in block comment
@@ -719,10 +720,10 @@ func TestIsInsideTypeBody_CachedLineState_MultiLineBlockComment(t *testing.T) {
 		}
 	}
 
-	doc := &documentSnapshot{
+	doc := &docstate.Snapshot{
 		Version: 1,
 		Text:    text,
-		lineState: &lineState{
+		LineState: &docstate.LineState{
 			Version:        1,
 			BraceDepth:     braceDepths,
 			InBlockComment: inComment,

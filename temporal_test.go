@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
+	"github.com/simon-lentz/yammm-lsp/internal/workspace"
 	"github.com/simon-lentz/yammm-lsp/testutil"
 )
 
@@ -157,7 +158,7 @@ func TestTemporal_ConcurrentOpenChangeClose(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := NewWorkspace(logger, Config{})
+	ws := workspace.NewWorkspace(logger, workspace.Config{})
 
 	const numURIs = 10
 	const iterations = 20
@@ -208,7 +209,7 @@ func TestTemporal_ConcurrentOpenCloseRace(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := NewWorkspace(logger, Config{})
+	ws := workspace.NewWorkspace(logger, workspace.Config{})
 
 	const iterations = 50
 	uri := "file:///test/race.yammm"

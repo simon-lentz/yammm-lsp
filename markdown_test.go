@@ -9,7 +9,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/simon-lentz/yammm-lsp/internal/docstate"
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
+	"github.com/simon-lentz/yammm-lsp/internal/workspace"
 
 	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 
@@ -514,7 +516,7 @@ func TestExtractCodeBlocks_Fixtures(t *testing.T) {
 			require.NoError(t, err)
 
 			// Normalize line endings like the workspace does.
-			content := normalizeLineEndings(string(data))
+			content := docstate.NormalizeLineEndings(string(data))
 			blocks := markdown.ExtractCodeBlocks(content)
 			assert.Len(t, blocks, tt.wantCount)
 		})
@@ -526,7 +528,7 @@ func TestExtractCodeBlocks_FixtureSimple_Details(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join("testdata", "lsp", "markdown", "simple.md"))
 	require.NoError(t, err)
-	content := normalizeLineEndings(string(data))
+	content := docstate.NormalizeLineEndings(string(data))
 
 	blocks := markdown.ExtractCodeBlocks(content)
 	require.Len(t, blocks, 1)
@@ -543,7 +545,7 @@ func TestExtractCodeBlocks_FixtureMultiple_Details(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join("testdata", "lsp", "markdown", "multiple.md"))
 	require.NoError(t, err)
-	content := normalizeLineEndings(string(data))
+	content := docstate.NormalizeLineEndings(string(data))
 
 	blocks := markdown.ExtractCodeBlocks(content)
 	require.Len(t, blocks, 2)
@@ -563,7 +565,7 @@ func TestExtractCodeBlocks_FixtureNested_Details(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join("testdata", "lsp", "markdown", "nested.md"))
 	require.NoError(t, err)
-	content := normalizeLineEndings(string(data))
+	content := docstate.NormalizeLineEndings(string(data))
 
 	blocks := markdown.ExtractCodeBlocks(content)
 	require.Len(t, blocks, 1)
@@ -581,7 +583,7 @@ func TestExtractCodeBlocks_FixtureIndented_Details(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join("testdata", "lsp", "markdown", "indented.md"))
 	require.NoError(t, err)
-	content := normalizeLineEndings(string(data))
+	content := docstate.NormalizeLineEndings(string(data))
 
 	blocks := markdown.ExtractCodeBlocks(content)
 	require.Len(t, blocks, 1)
@@ -746,7 +748,7 @@ func TestMarkdownPositionToBlock(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			snap := &markdownDocumentSnapshot{Blocks: tt.blocks}
+			snap := &workspace.MarkdownDocumentSnapshot{Blocks: tt.blocks}
 			pos := snap.MarkdownPositionToBlock(tt.line, tt.char)
 
 			if tt.wantNil {
@@ -825,7 +827,7 @@ func TestBlockPositionToMarkdown(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			snap := &markdownDocumentSnapshot{Blocks: tt.blocks}
+			snap := &workspace.MarkdownDocumentSnapshot{Blocks: tt.blocks}
 			line, char := snap.BlockPositionToMarkdown(tt.blockIndex, tt.localLine, tt.localChar)
 			assert.Equal(t, tt.wantLine, line)
 			assert.Equal(t, tt.wantChar, char)
@@ -874,7 +876,7 @@ func TestMarkdownPositionToBlock_WithPrefixLines(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			snap := &markdownDocumentSnapshot{Blocks: tt.blocks}
+			snap := &workspace.MarkdownDocumentSnapshot{Blocks: tt.blocks}
 			pos := snap.MarkdownPositionToBlock(tt.line, tt.char)
 
 			if tt.wantNil {
@@ -941,7 +943,7 @@ func TestBlockPositionToMarkdown_WithPrefixLines(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			snap := &markdownDocumentSnapshot{Blocks: tt.blocks}
+			snap := &workspace.MarkdownDocumentSnapshot{Blocks: tt.blocks}
 			line, char := snap.BlockPositionToMarkdown(tt.blockIndex, tt.localLine, tt.localChar)
 			assert.Equal(t, tt.wantLine, line)
 			assert.Equal(t, tt.wantChar, char)
@@ -952,7 +954,7 @@ func TestBlockPositionToMarkdown_WithPrefixLines(t *testing.T) {
 func TestPositionConversion_RoundTrip_WithPrefixLines(t *testing.T) {
 	t.Parallel()
 
-	snap := &markdownDocumentSnapshot{
+	snap := &workspace.MarkdownDocumentSnapshot{
 		Blocks: []markdown.CodeBlock{
 			{StartLine: 5, EndLine: 10, PrefixLines: 1},
 			{StartLine: 15, EndLine: 20, PrefixLines: 0},
@@ -988,7 +990,7 @@ func TestPositionConversion_RoundTrip_WithPrefixLines(t *testing.T) {
 func TestPositionConversion_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	snap := &markdownDocumentSnapshot{
+	snap := &workspace.MarkdownDocumentSnapshot{
 		Blocks: []markdown.CodeBlock{
 			{StartLine: 3, EndLine: 8},
 			{StartLine: 12, EndLine: 15},
@@ -1143,7 +1145,7 @@ func TestMergeIncrementalChanges(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := mergeIncrementalChanges(tt.current, PositionEncodingUTF16, tt.changes, slog.Default())
+			got := workspace.MergeIncrementalChangesForTest(tt.current, PositionEncodingUTF16, tt.changes, slog.Default())
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -1188,10 +1190,10 @@ func (c *notificationCollector) diagnosticsFor(uri string) []protocol.Diagnostic
 func TestMarkdownDocumentOpened_CreatesEntry(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/doc.md"
 
-	w.markdownDocumentOpened(uri, 1, "# Hello\n\n```yammm\nschema \"test\"\n```\n")
+	w.MarkdownDocumentOpened(uri, 1, "# Hello\n\n```yammm\nschema \"test\"\n```\n")
 
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
@@ -1204,14 +1206,14 @@ func TestMarkdownDocumentOpened_CreatesEntry(t *testing.T) {
 func TestMarkdownDocumentChanged_RejectsStale(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/doc.md"
 
-	w.markdownDocumentOpened(uri, 1, "original")
-	w.markdownDocumentChanged(uri, 2, "updated")
-	w.markdownDocumentChanged(uri, 1, "stale")
+	w.MarkdownDocumentOpened(uri, 1, "original")
+	w.MarkdownDocumentChangedForTest(uri, 2, "updated")
+	w.MarkdownDocumentChangedForTest(uri, 1, "stale")
 
-	text, ok := w.getMarkdownCurrentText(uri)
+	text, ok := w.GetMarkdownCurrentText(uri)
 	require.True(t, ok)
 	assert.Equal(t, "updated", text)
 }
@@ -1219,13 +1221,13 @@ func TestMarkdownDocumentChanged_RejectsStale(t *testing.T) {
 func TestMarkdownDocumentChanged_AcceptsZeroVersion(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/doc.md"
 
-	w.markdownDocumentOpened(uri, 0, "original")
-	w.markdownDocumentChanged(uri, 0, "updated")
+	w.MarkdownDocumentOpened(uri, 0, "original")
+	w.MarkdownDocumentChangedForTest(uri, 0, "updated")
 
-	text, ok := w.getMarkdownCurrentText(uri)
+	text, ok := w.GetMarkdownCurrentText(uri)
 	require.True(t, ok)
 	assert.Equal(t, "updated", text)
 }
@@ -1233,12 +1235,12 @@ func TestMarkdownDocumentChanged_AcceptsZeroVersion(t *testing.T) {
 func TestMarkdownDocumentClosed_CleansUp(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/doc.md"
 	collector := &notificationCollector{}
 
-	w.markdownDocumentOpened(uri, 1, "# Test")
-	w.markdownDocumentClosed(collector.notify, uri)
+	w.MarkdownDocumentOpened(uri, 1, "# Test")
+	w.MarkdownDocumentClosedForTest(collector.notify, uri)
 
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	assert.Nil(t, snap)
@@ -1247,21 +1249,21 @@ func TestMarkdownDocumentClosed_CleansUp(t *testing.T) {
 func TestMarkdownDocumentClosed_PublishesClearDiagnostics(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/close_diag.md"
 	collector := &notificationCollector{}
 
 	// Open markdown with syntax error to produce diagnostics.
 	content := "# Test\n\n```yammm\nnot valid schema!!!\n```\n"
-	w.markdownDocumentOpened(uri, 1, content)
-	w.analyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
+	w.MarkdownDocumentOpened(uri, 1, content)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	// Verify non-empty diagnostics were published.
 	diags := collector.diagnosticsFor(uri)
 	require.NotEmpty(t, diags, "precondition: diagnostics published for invalid content")
 
 	// Close — should publish empty diagnostics to clear editor.
-	w.markdownDocumentClosed(collector.notify, uri)
+	w.MarkdownDocumentClosedForTest(collector.notify, uri)
 
 	// Verify snapshot cleared.
 	snap := w.GetMarkdownDocumentSnapshot(uri)
@@ -1278,14 +1280,14 @@ func TestMarkdownDocumentClosed_PublishesClearDiagnostics(t *testing.T) {
 func TestAnalyzeMarkdownAndPublish_ProducesDiagnostics(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/doc.md"
 	collector := &notificationCollector{}
 
 	// Content with a syntax error in the code block
 	content := "# Test\n\n```yammm\nnot valid schema!!!\n```\n"
-	w.markdownDocumentOpened(uri, 1, content)
-	w.analyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
+	w.MarkdownDocumentOpened(uri, 1, content)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	// Verify diagnostics were published
 	diags := collector.diagnosticsFor(uri)
@@ -1301,14 +1303,14 @@ func TestAnalyzeMarkdownAndPublish_ProducesDiagnostics(t *testing.T) {
 func TestAnalyzeMarkdownAndPublish_EmptyBlocks(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/doc.md"
 	collector := &notificationCollector{}
 
 	// Markdown with no yammm blocks
 	content := "# Just prose\n\nNo code here.\n"
-	w.markdownDocumentOpened(uri, 1, content)
-	w.analyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
+	w.MarkdownDocumentOpened(uri, 1, content)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
@@ -1319,13 +1321,13 @@ func TestAnalyzeMarkdownAndPublish_EmptyBlocks(t *testing.T) {
 func TestAnalyzeMarkdownAndPublish_ImportRejection(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/doc.md"
 	collector := &notificationCollector{}
 
 	content := "# Import Test\n\n```yammm\nschema \"import_test\"\n\nimport \"./sibling\" as s\n\ntype Foo {\n    id String primary\n}\n```\n"
-	w.markdownDocumentOpened(uri, 1, content)
-	w.analyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
+	w.MarkdownDocumentOpened(uri, 1, content)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	diags := collector.diagnosticsFor(uri)
 	require.NotEmpty(t, diags, "expected diagnostics for import rejection")
@@ -1350,14 +1352,14 @@ func TestAnalyzeMarkdownAndPublish_ImportRejection(t *testing.T) {
 func TestAnalyzeMarkdownAndPublish_SnippetBlock(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/snippet.md"
 	collector := &notificationCollector{}
 
 	// A snippet block with no schema declaration — just a type definition
 	content := "# Snippet Example\n\n```yammm\ntype Foo {\n    id String primary\n    name String required\n}\n```\n"
-	w.markdownDocumentOpened(uri, 1, content)
-	w.analyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
+	w.MarkdownDocumentOpened(uri, 1, content)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
@@ -1384,13 +1386,13 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlock(t *testing.T) {
 func TestAnalyzeMarkdownAndPublish_SnippetBlockWithSchemaSkipsPrefix(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/full.md"
 
 	// A block WITH a schema declaration — should NOT get a prefix
 	content := "# Full Schema\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
-	w.markdownDocumentOpened(uri, 1, content)
-	w.analyzeMarkdownAndPublish(nil, t.Context(), uri)
+	w.MarkdownDocumentOpened(uri, 1, content)
+	w.AnalyzeMarkdownAndPublish(nil, t.Context(), uri)
 
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
@@ -1403,35 +1405,29 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlockWithSchemaSkipsPrefix(t *testing.
 func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/doc.md"
 	collector := &notificationCollector{}
 
 	content := "# Test\n\n```yammm\nschema \"test\"\n```\n"
-	w.markdownDocumentOpened(uri, 1, content)
+	w.MarkdownDocumentOpened(uri, 1, content)
 
 	// Change the document version before analysis completes
-	w.markdownDocumentChanged(uri, 2, "# Changed\n\n```yammm\nschema \"changed\"\n```\n")
+	w.MarkdownDocumentChangedForTest(uri, 2, "# Changed\n\n```yammm\nschema \"changed\"\n```\n")
 
 	// Analyze with original version — the results should be discarded
 	// because the document version has changed
-	w.mu.Lock()
-	w.docs.markdownDocs[uri].Version = 1
-	w.mu.Unlock()
+	w.SetMarkdownVersionForTest(uri, 1)
 
 	// Manually change back to force version mismatch after analysis
-	w.mu.Lock()
-	w.docs.markdownDocs[uri].Version = 2
-	w.mu.Unlock()
+	w.SetMarkdownVersionForTest(uri, 2)
 
 	// Simulate analysis starting with v1 — since we can't easily test async
 	// version gating, we verify the snapshot structure is correct after a
 	// successful analysis
-	w.mu.Lock()
-	w.docs.markdownDocs[uri].Version = 1
-	w.mu.Unlock()
+	w.SetMarkdownVersionForTest(uri, 1)
 
-	w.analyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	// This should succeed since version matches
 	snap := w.GetMarkdownDocumentSnapshot(uri)
@@ -1442,13 +1438,13 @@ func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 	t.Parallel()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///test/doc.md"
 	collector := &notificationCollector{}
 
 	content := "# Valid Schema\n\n```yammm\nschema \"test\"\n\ntype Foo {\n    id String primary\n}\n```\n"
-	w.markdownDocumentOpened(uri, 1, content)
-	w.analyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
+	w.MarkdownDocumentOpened(uri, 1, content)
+	w.AnalyzeMarkdownAndPublish(collector.notify, t.Context(), uri)
 
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
@@ -1486,14 +1482,14 @@ func BenchmarkAnalyzeMarkdownAndPublish_ManyBlocks(b *testing.B) {
 	}
 	content := sb.String()
 
-	w := NewWorkspace(slog.Default(), Config{})
+	w := workspace.NewWorkspace(slog.Default(), workspace.Config{})
 	uri := "file:///bench/many_blocks.md"
-	w.markdownDocumentOpened(uri, 1, content)
+	w.MarkdownDocumentOpened(uri, 1, content)
 
 	ctx := b.Context()
 	b.ResetTimer()
 	for b.Loop() {
-		w.analyzeMarkdownAndPublish(nil, ctx, uri)
+		w.AnalyzeMarkdownAndPublish(nil, ctx, uri)
 	}
 }
 
@@ -1504,15 +1500,15 @@ func testServerWithLogger() *Server {
 	logger := slog.Default()
 	return &Server{
 		logger:    logger,
-		workspace: NewWorkspace(logger, Config{}),
+		workspace: workspace.NewWorkspace(logger, workspace.Config{}),
 	}
 }
 
 // analyzeMarkdownForTest opens a markdown document, runs analysis, and returns the snapshot.
-func analyzeMarkdownForTest(t *testing.T, s *Server, uri, content string) *markdownDocumentSnapshot {
+func analyzeMarkdownForTest(t *testing.T, s *Server, uri, content string) *workspace.MarkdownDocumentSnapshot {
 	t.Helper()
-	s.workspace.markdownDocumentOpened(uri, 1, content)
-	s.workspace.analyzeMarkdownAndPublish(nil, t.Context(), uri)
+	s.workspace.MarkdownDocumentOpened(uri, 1, content)
+	s.workspace.AnalyzeMarkdownAndPublish(nil, t.Context(), uri)
 	snap := s.workspace.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
 	return snap
@@ -1522,7 +1518,7 @@ func TestBuildBlockDocumentSnapshot(t *testing.T) {
 	t.Parallel()
 
 	s := testServerWithLogger()
-	mdSnap := &markdownDocumentSnapshot{
+	mdSnap := &workspace.MarkdownDocumentSnapshot{
 		URI:     "file:///test/doc.md",
 		Version: 42,
 		Blocks: []markdown.CodeBlock{
@@ -1546,11 +1542,11 @@ func TestBuildBlockDocumentSnapshot(t *testing.T) {
 	assert.Equal(t, id, docSnap.SourceID, "SourceID should come from block")
 	assert.Equal(t, 42, docSnap.Version, "Version should come from mdSnap")
 	assert.Equal(t, mdSnap.Blocks[0].Content, docSnap.Text, "Text should be block content")
-	require.NotNil(t, docSnap.lineState, "lineState should be computed")
-	assert.Equal(t, 42, docSnap.lineState.Version, "lineState version should match mdSnap")
+	require.NotNil(t, docSnap.LineState, "lineState should be computed")
+	assert.Equal(t, 42, docSnap.LineState.Version, "lineState version should match mdSnap")
 
 	// The block content has 5 lines, so BraceDepth should have 5 entries
-	assert.Len(t, docSnap.lineState.BraceDepth, 5, "BraceDepth should have one entry per line")
+	assert.Len(t, docSnap.LineState.BraceDepth, 5, "BraceDepth should have one entry per line")
 }
 
 func TestRemapDocumentSymbolRanges(t *testing.T) {
@@ -1646,7 +1642,7 @@ func TestRemapDocumentSymbolRanges(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			mdSnap := &markdownDocumentSnapshot{Blocks: tt.blocks}
+			mdSnap := &workspace.MarkdownDocumentSnapshot{Blocks: tt.blocks}
 			remap := &blockRemap{mdSnap: mdSnap, blockIndex: tt.blockIndex}
 			result := remapDocumentSymbolRanges(tt.symbols, remap)
 
@@ -1776,10 +1772,8 @@ func TestMarkdownCompletion_NilSnapshot(t *testing.T) {
 	require.NoError(t, err)
 
 	// Open the markdown document and inject blocks/snapshots manually
-	s.workspace.markdownDocumentOpened(uri, 1, "```yammm\nschema \"test\"\n```\n")
-	s.workspace.mu.Lock()
-	md := s.workspace.docs.markdownDocs[uri]
-	md.Blocks = []markdown.CodeBlock{
+	s.workspace.MarkdownDocumentOpened(uri, 1, "```yammm\nschema \"test\"\n```\n")
+	s.workspace.SetMarkdownBlocksForTest(uri, []markdown.CodeBlock{
 		{
 			Content:   "schema \"test\"\n",
 			SourceID:  id,
@@ -1787,9 +1781,7 @@ func TestMarkdownCompletion_NilSnapshot(t *testing.T) {
 			EndLine:   2,
 			FenceChar: '`',
 		},
-	}
-	md.Snapshots = []*analysis.Snapshot{nil} // nil snapshot
-	s.workspace.mu.Unlock()
+	}, []*analysis.Snapshot{nil})
 
 	// Request completion inside the block (line 1 = block start)
 	params := &protocol.CompletionParams{
@@ -1901,15 +1893,11 @@ func TestMarkdownDocumentSymbols_NilSnapshots(t *testing.T) {
 	uri := "file:///test/nil_snap.md"
 
 	// Open and inject blocks with nil snapshots directly in the workspace
-	s.workspace.markdownDocumentOpened(uri, 1, "```yammm\ninvalid\n```\n\n```yammm\nalso invalid\n```\n")
-	s.workspace.mu.Lock()
-	md := s.workspace.docs.markdownDocs[uri]
-	md.Blocks = []markdown.CodeBlock{
+	s.workspace.MarkdownDocumentOpened(uri, 1, "```yammm\ninvalid\n```\n\n```yammm\nalso invalid\n```\n")
+	s.workspace.SetMarkdownBlocksForTest(uri, []markdown.CodeBlock{
 		{Content: "invalid", StartLine: 1, EndLine: 2},
 		{Content: "also invalid", StartLine: 5, EndLine: 6},
-	}
-	md.Snapshots = []*analysis.Snapshot{nil, nil}
-	s.workspace.mu.Unlock()
+	}, []*analysis.Snapshot{nil, nil})
 
 	params := &protocol.DocumentSymbolParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: uri},

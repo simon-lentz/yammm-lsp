@@ -1,4 +1,4 @@
-package lsp
+package workspace
 
 import (
 	"context"
@@ -7,6 +7,18 @@ import (
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
 )
+
+// debounceDelay is the delay before triggering analysis after a change.
+const debounceDelay = 150 * time.Millisecond
+
+// debounceEntry tracks a pending analysis for a single document.
+// Using a struct with pointer identity allows callbacks to safely clean up
+// only their own entries, avoiding the race where a stale callback deletes
+// a newer entry that was scheduled while analysis was running.
+type debounceEntry struct {
+	timer  *time.Timer
+	cancel context.CancelFunc
+}
 
 // analysisScheduler manages debounced analysis scheduling and background context.
 //
@@ -31,7 +43,7 @@ type analysisScheduler struct {
 // schedule schedules a debounced analysis for the given URI.
 // analyzeFn is called after the debounce delay with (notify, analyzeCtx, uri).
 // This unified method handles both .yammm and markdown analysis scheduling.
-func (s *analysisScheduler) schedule(notify notifyFunc, uri string, analyzeFn func(notifyFunc, context.Context, string)) {
+func (s *analysisScheduler) schedule(notify NotifyFunc, uri string, analyzeFn func(NotifyFunc, context.Context, string)) {
 	s.debounceMu.Lock()
 	defer s.debounceMu.Unlock()
 

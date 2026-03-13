@@ -23,15 +23,21 @@
 //
 // # Architecture
 //
+// The root lsp package is a thin coordination layer containing the Server,
+// protocol lifecycle, and feature providers. State management is enforced
+// at the compiler level via internal packages.
+//
 // The server consists of:
 //   - Server: Main LSP server handling protocol lifecycle
-//   - Workspace: Manages open documents, overlays, and analysis snapshots
+//   - Feature providers: Definition, hover, completion, symbols, formatting
+//   - internal/workspace: Manages open documents, markdown lifecycle, analysis scheduling, dependency tracking, and URI mapping
+//   - internal/docstate: Pure document types (.yammm overlays, text normalization, brace scanning) — true leaf, no internal imports
 //   - internal/analysis: Wraps schema/load for import-aware analysis
 //   - internal/symbols: Symbol extraction and indexing
 //   - internal/format: YAMMM document formatting
 //   - internal/markdown: Code block extraction from Markdown
 //   - internal/lsputil: URI/path conversion and position encoding
-//   - Feature providers: Definition, hover, completion, symbols, formatting
+//   - internal/protocol: LSP protocol type definitions
 //
 // # Usage
 //

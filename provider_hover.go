@@ -13,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/docstate"
 	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
@@ -51,7 +52,7 @@ func (s *Server) textDocumentHover(_ context.Context, params *protocol.HoverPara
 // Returns nil, nil when no hover info is found.
 //
 //nolint:nilnil // LSP protocol: nil result means "no hover info"
-func (s *Server) hoverAtPosition(snapshot *analysis.Snapshot, doc *documentSnapshot, line, char int) (*protocol.Hover, error) {
+func (s *Server) hoverAtPosition(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char int) (*protocol.Hover, error) {
 	if snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for hover",
 			"uri", doc.URI,

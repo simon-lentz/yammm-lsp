@@ -1,4 +1,4 @@
-package lsp
+package workspace
 
 import (
 	"log/slog"
@@ -13,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/location"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/docstate"
 	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 )
 
@@ -136,7 +137,7 @@ func TestNewWorkspace(t *testing.T) {
 	if ws == nil {
 		t.Fatal("NewWorkspace() returned nil")
 	}
-	if ws.posEncoding != PositionEncodingUTF16 {
+	if ws.posEncoding != lsputil.PositionEncodingUTF16 {
 		t.Errorf("posEncoding = %q; want UTF-16", ws.posEncoding)
 	}
 }
@@ -263,9 +264,9 @@ func TestWorkspace_FindModuleRoot_CrossSymlink(t *testing.T) {
 		t.Fatalf("failed to resolve symlink file path: %v", err)
 	}
 
-	got := ws.findModuleRoot(canonicalFilePath)
+	got := ws.FindModuleRoot(canonicalFilePath)
 	if got != canonicalProject {
-		t.Errorf("findModuleRoot(%q) = %q; want %q", canonicalFilePath, got, canonicalProject)
+		t.Errorf("FindModuleRoot(%q) = %q; want %q", canonicalFilePath, got, canonicalProject)
 	}
 }
 
@@ -296,13 +297,13 @@ func TestWorkspace_SetPositionEncoding(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := NewWorkspace(logger, Config{})
 
-	ws.SetPositionEncoding(PositionEncodingUTF8)
+	ws.SetPositionEncoding(lsputil.PositionEncodingUTF8)
 
 	ws.mu.RLock()
 	enc := ws.posEncoding
 	ws.mu.RUnlock()
 
-	if enc != PositionEncodingUTF8 {
+	if enc != lsputil.PositionEncodingUTF8 {
 		t.Errorf("posEncoding = %q; want UTF-8", enc)
 	}
 }
@@ -317,7 +318,7 @@ func TestWorkspace_DocumentLifecycle(t *testing.T) {
 	text := "type Person { name: String }"
 
 	// Open document
-	ws.documentOpened(uri, 1, text)
+	ws.DocumentOpened(uri, 1, text)
 
 	doc := ws.GetDocumentSnapshot(uri)
 	if doc == nil {
@@ -347,7 +348,7 @@ func TestWorkspace_DocumentLifecycle(t *testing.T) {
 
 	// Close document (without glsp context, just test internal state)
 	ws.mu.Lock()
-	delete(ws.docs.open, uri)
+	delete(ws.docs.Open, uri)
 	ws.mu.Unlock()
 
 	doc = ws.GetDocumentSnapshot(uri)
@@ -363,7 +364,7 @@ func TestWorkspace_DocumentOpened_InvalidURI(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	// Invalid URI should be logged but document not added
-	ws.documentOpened("http://invalid", 1, "content")
+	ws.DocumentOpened("http://invalid", 1, "content")
 
 	doc := ws.GetDocumentSnapshot("http://invalid")
 	if doc != nil {
@@ -392,9 +393,9 @@ func TestWorkspace_FindModuleRoot_Configured(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := NewWorkspace(logger, Config{ModuleRoot: "/configured/root"})
 
-	got := ws.findModuleRoot("/any/path/file.yammm")
+	got := ws.FindModuleRoot("/any/path/file.yammm")
 	if got != "/configured/root" {
-		t.Errorf("findModuleRoot() = %q; want /configured/root", got)
+		t.Errorf("FindModuleRoot() = %q; want /configured/root", got)
 	}
 }
 
@@ -405,9 +406,9 @@ func TestWorkspace_FindModuleRoot_WorkspaceFolder(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 	ws.AddRoot("file:///project")
 
-	got := ws.findModuleRoot("/project/subdir/file.yammm")
+	got := ws.FindModuleRoot("/project/subdir/file.yammm")
 	if got != "/project" {
-		t.Errorf("findModuleRoot() = %q; want /project", got)
+		t.Errorf("FindModuleRoot() = %q; want /project", got)
 	}
 }
 
@@ -419,9 +420,9 @@ func TestWorkspace_FindModuleRoot_Fallback(t *testing.T) {
 	ws.AddRoot("file:///other/project")
 
 	// Path not under any workspace folder
-	got := ws.findModuleRoot("/unrelated/path/file.yammm")
+	got := ws.FindModuleRoot("/unrelated/path/file.yammm")
 	if got != "/unrelated/path" {
-		t.Errorf("findModuleRoot() = %q; want /unrelated/path", got)
+		t.Errorf("FindModuleRoot() = %q; want /unrelated/path", got)
 	}
 }
 
@@ -436,15 +437,15 @@ func TestWorkspace_FindModuleRoot_NestedWorkspaceFolders(t *testing.T) {
 	ws.AddRoot("file:///project/submodule")
 
 	// File in the nested submodule should use the deepest matching root
-	got := ws.findModuleRoot("/project/submodule/schemas/file.yammm")
+	got := ws.FindModuleRoot("/project/submodule/schemas/file.yammm")
 	if got != "/project/submodule" {
-		t.Errorf("findModuleRoot() = %q; want /project/submodule (deepest match)", got)
+		t.Errorf("FindModuleRoot() = %q; want /project/submodule (deepest match)", got)
 	}
 
 	// File in the parent project should use the parent root
-	got = ws.findModuleRoot("/project/other/file.yammm")
+	got = ws.FindModuleRoot("/project/other/file.yammm")
 	if got != "/project" {
-		t.Errorf("findModuleRoot() = %q; want /project", got)
+		t.Errorf("FindModuleRoot() = %q; want /project", got)
 	}
 }
 
@@ -460,9 +461,9 @@ func TestWorkspace_FindModuleRoot_NestedWorkspaceFolders_ReverseOrder(t *testing
 	ws.AddRoot("file:///project")
 
 	// File in the nested submodule should still use the deepest matching root
-	got := ws.findModuleRoot("/project/submodule/schemas/file.yammm")
+	got := ws.FindModuleRoot("/project/submodule/schemas/file.yammm")
 	if got != "/project/submodule" {
-		t.Errorf("findModuleRoot() = %q; want /project/submodule (deepest match)", got)
+		t.Errorf("FindModuleRoot() = %q; want /project/submodule (deepest match)", got)
 	}
 }
 
@@ -477,21 +478,21 @@ func TestWorkspace_FindModuleRoot_SimilarPrefixRoots(t *testing.T) {
 
 	// File in /project2 should NOT match /project (they share a string prefix
 	// but /project2 is not under /project). Should fall back to file's directory.
-	got := ws.findModuleRoot("/project2/file.yammm")
+	got := ws.FindModuleRoot("/project2/file.yammm")
 	if got != "/project2" {
-		t.Errorf("findModuleRoot(/project2/file.yammm) = %q; want /project2 (fallback)", got)
+		t.Errorf("FindModuleRoot(/project2/file.yammm) = %q; want /project2 (fallback)", got)
 	}
 
 	// File in /project-extra should match /project-extra, not /project
-	got = ws.findModuleRoot("/project-extra/subdir/file.yammm")
+	got = ws.FindModuleRoot("/project-extra/subdir/file.yammm")
 	if got != "/project-extra" {
-		t.Errorf("findModuleRoot(/project-extra/...) = %q; want /project-extra", got)
+		t.Errorf("FindModuleRoot(/project-extra/...) = %q; want /project-extra", got)
 	}
 
 	// File directly in /project should still match /project
-	got = ws.findModuleRoot("/project/file.yammm")
+	got = ws.FindModuleRoot("/project/file.yammm")
 	if got != "/project" {
-		t.Errorf("findModuleRoot(/project/file.yammm) = %q; want /project", got)
+		t.Errorf("FindModuleRoot(/project/file.yammm) = %q; want /project", got)
 	}
 }
 
@@ -569,7 +570,7 @@ func TestWorkspace_ConcurrentDocumentAccess(t *testing.T) {
 	for i := range numGoroutines {
 		wg.Go(func() {
 			uri := "file:///test/file.yammm"
-			ws.documentOpened(uri, i, "content")
+			ws.DocumentOpened(uri, i, "content")
 			ws.documentChanged(uri, i+1, "new content")
 		})
 	}
@@ -589,11 +590,11 @@ func TestWorkspace_ConcurrentDocumentAccess(t *testing.T) {
 func TestPositionEncodingConstants(t *testing.T) {
 	t.Parallel()
 
-	if PositionEncodingUTF16 != "utf-16" {
-		t.Errorf("PositionEncodingUTF16 = %q; want utf-16", PositionEncodingUTF16)
+	if lsputil.PositionEncodingUTF16 != "utf-16" {
+		t.Errorf("PositionEncodingUTF16 = %q; want utf-16", lsputil.PositionEncodingUTF16)
 	}
-	if PositionEncodingUTF8 != "utf-8" {
-		t.Errorf("PositionEncodingUTF8 = %q; want utf-8", PositionEncodingUTF8)
+	if lsputil.PositionEncodingUTF8 != "utf-8" {
+		t.Errorf("PositionEncodingUTF8 = %q; want utf-8", lsputil.PositionEncodingUTF8)
 	}
 }
 
@@ -604,7 +605,7 @@ func TestDocument_SourceID(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	uri := "file:///test/schema.yammm"
-	ws.documentOpened(uri, 1, "content")
+	ws.DocumentOpened(uri, 1, "content")
 
 	doc := ws.GetDocumentSnapshot(uri)
 	if doc == nil {
@@ -781,11 +782,11 @@ func TestBuildCanonicalToURIMap_SymlinkResolution(t *testing.T) {
 
 	// Open document via symlink URI
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.documentOpened(linkURI, 1, "content")
+	ws.DocumentOpened(linkURI, 1, "content")
 
 	// Build the canonical mapping
 	ws.mu.RLock()
-	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.open)
+	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.Open)
 	ws.mu.RUnlock()
 
 	// The mapping should map the canonical (resolved) path to the symlink URI
@@ -819,11 +820,11 @@ func TestBuildCanonicalToURIMap_NoSymlinks(t *testing.T) {
 
 	// Open document via real path
 	realURI := lsputil.PathToURI(realPath)
-	ws.documentOpened(realURI, 1, "content")
+	ws.DocumentOpened(realURI, 1, "content")
 
 	// Build the canonical mapping
 	ws.mu.RLock()
-	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.open)
+	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.Open)
 	ws.mu.RUnlock()
 
 	// The mapping should map the canonical path to the original URI
@@ -872,22 +873,22 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 
 	// Open document via symlink URI FIRST (openOrder=1)
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.documentOpened(linkURI, 1, "content via symlink")
+	ws.DocumentOpened(linkURI, 1, "content via symlink")
 
 	// Open same document via real path URI SECOND (openOrder=2)
 	realURI := lsputil.PathToURI(realPath)
-	ws.documentOpened(realURI, 1, "content via real path")
+	ws.DocumentOpened(realURI, 1, "content via real path")
 
 	// Both documents should be tracked (different URIs)
 	ws.mu.RLock()
-	if len(ws.docs.open) != 2 {
-		t.Errorf("expected 2 open documents, got %d", len(ws.docs.open))
+	if len(ws.docs.Open) != 2 {
+		t.Errorf("expected 2 open documents, got %d", len(ws.docs.Open))
 	}
 	ws.mu.RUnlock()
 
 	// Build the canonical mapping - should prefer first-opened (symlink) due to lower OpenOrder
 	ws.mu.RLock()
-	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.open)
+	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.Open)
 	ws.mu.RUnlock()
 
 	if docURI, ok := mapping[canonicalRealPath]; ok {
@@ -903,7 +904,7 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 
 	// Rebuild mapping - should now prefer the real path URI (only one remaining)
 	ws.mu.RLock()
-	mapping2 := ws.mapper.buildCanonicalToURIMap(ws.docs.open)
+	mapping2 := ws.mapper.buildCanonicalToURIMap(ws.docs.Open)
 	ws.mu.RUnlock()
 
 	if docURI, ok := mapping2[canonicalRealPath]; ok {
@@ -1070,7 +1071,7 @@ func TestPublishSnapshotDiagnostics_SymlinkURIRemapping(t *testing.T) {
 
 	// Open document via symlink URI
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.documentOpened(linkURI, 1, "content")
+	ws.DocumentOpened(linkURI, 1, "content")
 
 	// Create a snapshot with diagnostics using the canonical (resolved) path
 	// This simulates what the loader produces
@@ -1136,7 +1137,7 @@ func TestPublishSnapshotDiagnostics_RelatedInfoURIRemapping(t *testing.T) {
 
 	// Open document via symlink URI
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.documentOpened(linkURI, 1, "content")
+	ws.DocumentOpened(linkURI, 1, "content")
 
 	// Create a snapshot with RelatedInformation also using canonical path
 	canonicalURI := lsputil.PathToURI(canonicalRealPath)
@@ -1227,7 +1228,7 @@ func evalSymlinks(path string) (string, error) {
 }
 
 func TestComputePublicationPlan_PerEntryIsolation(t *testing.T) {
-	// Test that publishedByEntry prevents cross-entry contamination:
+	// Test that PublishedByEntry prevents cross-entry contamination:
 	// - main.yammm publishes diagnostics for main.yammm and parts.yammm
 	// - other.yammm publishes diagnostics for other.yammm only
 	// - Clearing main.yammm should NOT affect other.yammm's diagnostics
@@ -1241,8 +1242,8 @@ func TestComputePublicationPlan_PerEntryIsolation(t *testing.T) {
 	partsURI := "file:///parts.yammm"
 	otherURI := "file:///other.yammm"
 
-	ws.documentOpened(mainURI, 1, "import parts")
-	ws.documentOpened(otherURI, 1, "standalone")
+	ws.DocumentOpened(mainURI, 1, "import parts")
+	ws.DocumentOpened(otherURI, 1, "standalone")
 
 	// First analysis: main.yammm publishes diagnostics for main and parts
 	mainSnapshot := &analysis.Snapshot{
@@ -1303,13 +1304,13 @@ func TestComputePublicationPlan_PerEntryIsolation(t *testing.T) {
 		t.Errorf("staleURIs should have 2 entries; got %v", staleURIs)
 	}
 
-	// Verify publishedByEntry still tracks other.yammm's publication
+	// Verify PublishedByEntry still tracks other.yammm's publication
 	ws.mu.RLock()
-	otherPublished := ws.mapper.publishedByEntry[otherURI]
+	otherPublished := ws.mapper.PublishedByEntry[otherURI]
 	ws.mu.RUnlock()
 
 	if _, ok := otherPublished[otherURI]; !ok {
-		t.Error("other.yammm should still be tracked in publishedByEntry")
+		t.Error("other.yammm should still be tracked in PublishedByEntry")
 	}
 }
 
@@ -1327,8 +1328,8 @@ func TestComputePublicationPlan_SharedImportMultipleEntries(t *testing.T) {
 	otherURI := "file:///other.yammm"
 	sharedURI := "file:///shared.yammm"
 
-	ws.documentOpened(mainURI, 1, "import shared")
-	ws.documentOpened(otherURI, 1, "import shared")
+	ws.DocumentOpened(mainURI, 1, "import shared")
+	ws.DocumentOpened(otherURI, 1, "import shared")
 
 	// Both entries publish diagnostics for shared
 	mainSnapshot := &analysis.Snapshot{
@@ -1353,8 +1354,8 @@ func TestComputePublicationPlan_SharedImportMultipleEntries(t *testing.T) {
 
 	// Verify both entries track shared.yammm
 	ws.mu.RLock()
-	mainPublished := ws.mapper.publishedByEntry[mainURI]
-	otherPublished := ws.mapper.publishedByEntry[otherURI]
+	mainPublished := ws.mapper.PublishedByEntry[mainURI]
+	otherPublished := ws.mapper.PublishedByEntry[otherURI]
 	ws.mu.RUnlock()
 
 	if _, ok := mainPublished[sharedURI]; !ok {
@@ -1386,7 +1387,7 @@ func TestComputePublicationPlan_SharedImportMultipleEntries(t *testing.T) {
 
 	// But other's tracking of shared should remain
 	ws.mu.RLock()
-	otherPublished = ws.mapper.publishedByEntry[otherURI]
+	otherPublished = ws.mapper.PublishedByEntry[otherURI]
 	ws.mu.RUnlock()
 
 	if _, ok := otherPublished[sharedURI]; !ok {
@@ -1404,7 +1405,7 @@ func TestComputePublicationPlan_DocumentCloseClearsAllEntryURIs(t *testing.T) {
 	mainURI := "file:///main.yammm"
 	partsURI := "file:///parts.yammm"
 
-	ws.documentOpened(mainURI, 1, "import parts")
+	ws.DocumentOpened(mainURI, 1, "import parts")
 
 	// Publish diagnostics for both main and parts
 	snapshot := &analysis.Snapshot{
@@ -1419,7 +1420,7 @@ func TestComputePublicationPlan_DocumentCloseClearsAllEntryURIs(t *testing.T) {
 
 	// Verify tracking
 	ws.mu.RLock()
-	published := ws.mapper.publishedByEntry[mainURI]
+	published := ws.mapper.PublishedByEntry[mainURI]
 	ws.mu.RUnlock()
 
 	if len(published) != 2 {
@@ -1441,7 +1442,7 @@ func TestComputePublicationPlan_DocumentCloseClearsAllEntryURIs(t *testing.T) {
 
 	// Published tracking should be empty for this entry
 	ws.mu.RLock()
-	published = ws.mapper.publishedByEntry[mainURI]
+	published = ws.mapper.PublishedByEntry[mainURI]
 	ws.mu.RUnlock()
 
 	if len(published) != 0 {
@@ -1483,7 +1484,7 @@ func TestWorkspace_FileChanged_SymlinkResolution(t *testing.T) {
 
 	// Create main.yammm that imports parts via canonical path
 	mainURI := "file:///main.yammm"
-	ws.documentOpened(mainURI, 1, "import parts")
+	ws.DocumentOpened(mainURI, 1, "import parts")
 
 	// Simulate the loader tracking: main depends on canonical parts path
 	ws.UpdateDependencies(mainURI, []string{canonicalParts})
@@ -1534,7 +1535,7 @@ func TestWorkspace_FileChanged_CanonicalPathMatching(t *testing.T) {
 	ws := NewWorkspace(logger, Config{})
 
 	mainURI := "file:///main.yammm"
-	ws.documentOpened(mainURI, 1, "content")
+	ws.DocumentOpened(mainURI, 1, "content")
 
 	// Set up dependency on a canonical path
 	canonicalPath := "/canonical/parts.yammm"
@@ -1689,7 +1690,7 @@ func TestScheduleMarkdownAnalysis_EntryPointerIdentity(t *testing.T) {
 	uri := "file:///test.md"
 
 	// Set up a markdown document so scheduleMarkdownAnalysis has something to work with
-	ws.markdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
+	ws.MarkdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
 
 	// Create entry0 (simulating first schedule)
 	ws.sched.debounceMu.Lock()
@@ -1753,7 +1754,7 @@ func TestScheduleMarkdownAnalysis_RescheduleWhilePending(t *testing.T) {
 	uri := "file:///test.md"
 
 	// Set up a markdown document
-	ws.markdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
+	ws.MarkdownDocumentOpened(uri, 1, "# Test\n\n```yammm\nschema \"test\"\n```\n")
 
 	// First schedule
 	ws.scheduleMarkdownAnalysis(nil, uri)
@@ -1793,7 +1794,7 @@ func TestRemapPathToURI_OpenDocument(t *testing.T) {
 
 	// Open a document - the URI used by client
 	clientURI := "file:///symlink/path/schema.yammm"
-	ws.documentOpened(clientURI, 1, "content")
+	ws.DocumentOpened(clientURI, 1, "content")
 
 	// Get the canonical path from the document's SourceID
 	doc := ws.GetDocumentSnapshot(clientURI)
@@ -1858,7 +1859,7 @@ func TestRemapPathToURI_SymlinkResolution(t *testing.T) {
 
 	// Open document via symlink URI
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.documentOpened(linkURI, 1, "content")
+	ws.DocumentOpened(linkURI, 1, "content")
 
 	// RemapPathToURI with canonical path should return the symlink URI
 	result := ws.RemapPathToURI(canonicalRealPath)
@@ -1899,11 +1900,11 @@ func TestRemapPathToURI_MultipleDocumentsSameCanonical(t *testing.T) {
 
 	// Open via symlink FIRST (lower OpenOrder)
 	linkURI := lsputil.PathToURI(linkPath)
-	ws.documentOpened(linkURI, 1, "content via symlink")
+	ws.DocumentOpened(linkURI, 1, "content via symlink")
 
 	// Open via real path SECOND (higher OpenOrder)
 	realURI := lsputil.PathToURI(realPath)
-	ws.documentOpened(realURI, 1, "content via real path")
+	ws.DocumentOpened(realURI, 1, "content via real path")
 
 	// RemapPathToURI should prefer the first-opened (symlink) URI
 	result := ws.RemapPathToURI(canonicalRealPath)
@@ -1961,14 +1962,14 @@ func TestComputeBraceDepths_CRLF(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, _ := computeBraceDepths(tt.text)
+			got, _ := docstate.ComputeBraceDepths(tt.text)
 			if len(got) != len(tt.want) {
-				t.Errorf("computeBraceDepths() returned %d lines; want %d lines", len(got), len(tt.want))
+				t.Errorf("ComputeBraceDepths() returned %d lines; want %d lines", len(got), len(tt.want))
 				return
 			}
 			for i := range got {
 				if got[i] != tt.want[i] {
-					t.Errorf("computeBraceDepths() line %d depth = %d; want %d", i, got[i], tt.want[i])
+					t.Errorf("ComputeBraceDepths() line %d depth = %d; want %d", i, got[i], tt.want[i])
 				}
 			}
 		})
@@ -2029,9 +2030,9 @@ func TestComputeBraceDepths_CommentLikeStrings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, _ := computeBraceDepths(tt.text)
+			got, _ := docstate.ComputeBraceDepths(tt.text)
 			if len(got) != len(tt.want) {
-				t.Errorf("computeBraceDepths() returned %d lines; want %d lines\ntext: %q",
+				t.Errorf("ComputeBraceDepths() returned %d lines; want %d lines\ntext: %q",
 					len(got), len(tt.want), tt.text)
 				return
 			}
@@ -2117,7 +2118,7 @@ func TestComputeBraceDepths_MultiLineBlockComments(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			gotDepths, gotInBlk := computeBraceDepths(tt.text)
+			gotDepths, gotInBlk := docstate.ComputeBraceDepths(tt.text)
 
 			if len(gotDepths) != len(tt.wantDepths) {
 				t.Errorf("depths: got %d lines; want %d lines\ntext: %q\ngot: %v",
@@ -2163,7 +2164,7 @@ func TestDocumentOpened_CRLFNormalization(t *testing.T) {
 
 	// Open document with CRLF line endings
 	textWithCRLF := "type Person {\r\n\tname string\r\n}\r\n"
-	ws.documentOpened(uri, 1, textWithCRLF)
+	ws.DocumentOpened(uri, 1, textWithCRLF)
 
 	// Verify stored text has LF only
 	doc := ws.GetDocumentSnapshot(uri)
@@ -2196,7 +2197,7 @@ func TestDocumentChanged_CRLFNormalization(t *testing.T) {
 	uri := lsputil.PathToURI(path)
 
 	// Open document first (with LF)
-	ws.documentOpened(uri, 1, "type Test {}\n")
+	ws.DocumentOpened(uri, 1, "type Test {}\n")
 
 	// Change with CRLF line endings
 	textWithCRLF := "type Updated {\r\n\tfield int\r\n}\r\n"
@@ -2227,7 +2228,7 @@ func TestDocumentChanged_VersionOrdering(t *testing.T) {
 	uri := lsputil.PathToURI(path)
 
 	// Open document at version 5
-	ws.documentOpened(uri, 5, "version5")
+	ws.DocumentOpened(uri, 5, "version5")
 
 	// Try to update with older version (should be ignored)
 	ws.documentChanged(uri, 3, "version3-stale")
@@ -2270,7 +2271,7 @@ func TestDocumentChanged_VersionZeroAccepted(t *testing.T) {
 	uri := lsputil.PathToURI(path)
 
 	// Open document at version 5
-	ws.documentOpened(uri, 5, "version5")
+	ws.DocumentOpened(uri, 5, "version5")
 
 	// Update with version 0 (unknown) should be accepted
 	ws.documentChanged(uri, 0, "versionZero")
@@ -2286,9 +2287,9 @@ func TestDocumentChanged_VersionZeroAccepted(t *testing.T) {
 }
 
 func TestDocumentChanged_Version0_InvalidatesLineStateCache(t *testing.T) {
-	// Tests that lineState cache is invalidated when text changes with version 0.
+	// Tests that LineState cache is invalidated when text changes with version 0.
 	// Without explicit invalidation, the cache would incorrectly remain valid
-	// because lineState.Version (0) == doc.Version (0) even though text changed.
+	// because LineState.Version (0) == doc.Version (0) even though text changed.
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -2301,35 +2302,35 @@ func TestDocumentChanged_Version0_InvalidatesLineStateCache(t *testing.T) {
 	uri := lsputil.PathToURI(path)
 
 	// Open document with version 0 and content that has brace depth 1
-	ws.documentOpened(uri, 0, "type A {")
+	ws.DocumentOpened(uri, 0, "type A {")
 
-	// Get snapshot to trigger lineState computation
+	// Get snapshot to trigger LineState computation
 	doc1 := ws.GetDocumentSnapshot(uri)
 	if doc1 == nil {
 		t.Fatal("document not found")
 	}
-	if doc1.lineState == nil {
-		t.Fatal("lineState should be computed on first access")
+	if doc1.LineState == nil {
+		t.Fatal("LineState should be computed on first access")
 	}
 	// Verify initial brace depth
-	if len(doc1.lineState.BraceDepth) != 1 || doc1.lineState.BraceDepth[0] != 1 {
-		t.Errorf("initial BraceDepth = %v; want [1]", doc1.lineState.BraceDepth)
+	if len(doc1.LineState.BraceDepth) != 1 || doc1.LineState.BraceDepth[0] != 1 {
+		t.Errorf("initial BraceDepth = %v; want [1]", doc1.LineState.BraceDepth)
 	}
 
 	// Update with version 0 again but different content (brace depth 0)
 	ws.documentChanged(uri, 0, "type A {}")
 
-	// Get new snapshot - should have fresh lineState reflecting new content
+	// Get new snapshot - should have fresh LineState reflecting new content
 	doc2 := ws.GetDocumentSnapshot(uri)
 	if doc2 == nil {
 		t.Fatal("document not found after change")
 	}
-	if doc2.lineState == nil {
-		t.Fatal("lineState should be recomputed after change")
+	if doc2.LineState == nil {
+		t.Fatal("LineState should be recomputed after change")
 	}
 	// Verify brace depth reflects new content (balanced braces = depth 0)
-	if len(doc2.lineState.BraceDepth) != 1 || doc2.lineState.BraceDepth[0] != 0 {
-		t.Errorf("updated BraceDepth = %v; want [0] (cache should have been invalidated)", doc2.lineState.BraceDepth)
+	if len(doc2.LineState.BraceDepth) != 1 || doc2.LineState.BraceDepth[0] != 0 {
+		t.Errorf("updated BraceDepth = %v; want [0] (cache should have been invalidated)", doc2.LineState.BraceDepth)
 	}
 }
 
@@ -2345,7 +2346,7 @@ func TestRemapPathToURI_ForwardSlashNormalization(t *testing.T) {
 
 	ws := NewWorkspace(nil, Config{})
 	uri := lsputil.PathToURI(path)
-	ws.documentOpened(uri, 1, "type Test {}")
+	ws.DocumentOpened(uri, 1, "type Test {}")
 
 	// On all platforms, RemapPathToURI should work with forward-slash paths
 	forwardSlashPath := filepath.ToSlash(path)
@@ -2407,6 +2408,23 @@ func TestRemapPathToURI_NonexistentPathWithDotDot(t *testing.T) {
 }
 
 // --- Diagnostic hash deduplication tests ---
+
+// notificationCollector is a test helper that records LSP notifications.
+type notificationCollector struct {
+	mu      sync.Mutex
+	entries []notificationEntry
+}
+
+type notificationEntry struct {
+	Method string
+	Params any
+}
+
+func (c *notificationCollector) notify(method string, params any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = append(c.entries, notificationEntry{Method: method, Params: params})
+}
 
 func TestPublishDiagnostics_HashDedup_SuppressesIdentical(t *testing.T) {
 	t.Parallel()
@@ -2513,9 +2531,9 @@ func TestPublishDiagnostics_NilNotify_NoHash(t *testing.T) {
 	// Publish with nil notify (test context) should not store hash.
 	ws.publishDiagnostics(nil, uri, nil, diags)
 
-	ws.diagHashMu.Lock()
-	_, exists := ws.diagHashes[uri]
-	ws.diagHashMu.Unlock()
+	ws.diagHash.mu.Lock()
+	_, exists := ws.diagHash.hashes[uri]
+	ws.diagHash.mu.Unlock()
 
 	if exists {
 		t.Error("hash should not be stored when notify is nil")

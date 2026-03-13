@@ -1,4 +1,4 @@
-package lsp
+package workspace
 
 import (
 	"log/slog"

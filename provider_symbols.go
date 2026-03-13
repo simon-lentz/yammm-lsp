@@ -8,6 +8,7 @@ import (
 	protocol "github.com/simon-lentz/yammm-lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm-lsp/internal/analysis"
+	"github.com/simon-lentz/yammm-lsp/internal/docstate"
 	"github.com/simon-lentz/yammm-lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm-lsp/internal/symbols"
 )
@@ -62,7 +63,7 @@ func remapDocumentSymbolRanges(symbols []protocol.DocumentSymbol, remap *blockRe
 
 // documentSymbolsFor returns document symbols for the given document within a snapshot.
 // Returns nil when no symbols are available.
-func (s *Server) documentSymbolsFor(snapshot *analysis.Snapshot, doc *documentSnapshot) []protocol.DocumentSymbol {
+func (s *Server) documentSymbolsFor(snapshot *analysis.Snapshot, doc *docstate.Snapshot) []protocol.DocumentSymbol {
 	if snapshot.EntryVersion != doc.Version {
 		s.logger.Debug("serving stale snapshot for documentSymbol",
 			"uri", doc.URI,
